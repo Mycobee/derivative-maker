@@ -1,3 +1,12 @@
 REF_TYPE: "{{ lookup('env', 'GITHUB_REF_TYPE') }}"
 GIT_REPO: "{{ lookup('env', 'REPO_URL') }}"
 REF_NAME: "{{ lookup('env', 'GITHUB_REF_NAME') }}"
+VBOX_ASC_FILES:
+  - {
+    'name': 'oracle_vbox',
+    'url': 'https://www.virtualbox.org/download/oracle_vbox.asc'
+  }
+  - {
+    'name': 'oracle_vbox_2016',
+    'url': 'https://www.virtualbox.org/download/oracle_vbox_2016.asc'
+  }

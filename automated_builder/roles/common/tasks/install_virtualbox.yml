@@ -1,0 +1,12 @@
+---
+- name: Install VirtualBox
+  become: true
+
+  block:
+    - name: Import VirtualBox GPG keys
+      get_url:
+        dest: "/root/{{ item.name }}.asc"
+        url: "{{ item.url }}"
+
+    - name: Create keyring files
+      shell: "gpg --dearmor /root/{{ item.name }}.asc > /usr/share/keyrings/{{ item.name }}.gpg"
