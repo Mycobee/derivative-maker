@@ -17,6 +17,7 @@ RUN apt-get install --yes \
     procps \
     lsof \
     cpio \
+    grub2 \
     grub-efi-arm64 \
     grub-efi-arm64-bin \
     netcat-openbsd
