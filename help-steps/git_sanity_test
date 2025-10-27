@@ -28,51 +28,117 @@ if [ "$script_was_sourced" = "false" ]; then
    source variables
 fi
 
-git_sanity_test_parse_cmd() {
-   true "INFO: $FUNCNAME | args: $@"
-   while :
-   do
-       case $1 in
-           --allow-untagged)
-               if [ "$2" = "false" ]; then
-                  true "${cyan}INFO: Would stop if building form untagged commits.${reset}"
-               elif [ "$2" = "true" ]; then
-                  true "${cyan}INFO: Would build form untagged commits.${reset}"
-                  export dist_build_ignore_untagged="true"
-               else
-                  echo "${red}${bold}ERROR: supported options for --allow-untagged are 'true' or 'false'.${reset}"
-                  exit 1
-               fi
-               shift 2
-               ;;
-           --allow-uncommitted)
-               if [ "$2" = "false" ]; then
-                  true "${cyan}INFO: Would stop if uncommitted changes detected.${reset}"
-               elif [ "$2" = "true" ]; then
-                  true "${cyan}INFO: Would ignore if uncommitted changes detected.${reset}"
-                  export dist_build_ignore_uncommitted="true"
-               else
-                  echo "${red}${bold}ERROR: supported options for --allow-uncommitted are 'true' or 'false'.${reset}"
-                  exit 1
-               fi
-               shift 2
-               ;;
-           *)
-               break
-               ;;
-       esac
-   done
+import_keys() {
+  local key_index derivative_signing_key_fingerprint_list derivative_signing_public_key_item derivative_signing_key_fingerprint_item
+
+  for key_index in "${!derivative_signing_public_key_list[@]}"; do
+    readarray -t derivative_signing_key_fingerprint_list <<< "${derivative_signing_key_fingerprint_group_list[key_index]}"
+    derivative_signing_public_key_item="${derivative_signing_public_key_list[key_index]}"
+
+    for derivative_signing_key_fingerprint_item in "${derivative_signing_key_fingerprint_list[@]}"; do
+      if gpg --quiet --list-keys -- "${derivative_signing_key_fingerprint_item}" &>/dev/null; then
+        true "INFO: key already imported."
+      else
+        true "INFO: key not yet already imported. Importing..."
+        gpg --keyid-format long --import --import-options show-only --with-fingerprint -- "${derivative_signing_public_key_item}"
+        gpg --import -- "${derivative_signing_public_key_item}"
+        gpg --check-sigs -- "${derivative_signing_key_fingerprint_item}"
+        break
+      fi
+    done
+  done
+}
+
+signed_by_fingerprint() {
+  local fingerprint derivative_signing_key_fingerprint_group derivative_signing_key_fingerprint_item derivative_signing_key_fingerprint_list
+
+  ## NOTE: Cannot use end-of-options ("--").
+  ##
+  ## NOTE: 'tail -n-1' is mandatory, otherwise verifying the fingerprint of a
+  ## tag will fail.
+  fingerprint=$(git show --no-patch --pretty="format:%GF" "${1}" | tail -n -1)
+
+  for derivative_signing_key_fingerprint_group in "${derivative_signing_key_fingerprint_group_list[@]}"; do
+    readarray -t derivative_signing_key_fingerprint_list <<< "${derivative_signing_key_fingerprint_group}"
+
+    for derivative_signing_key_fingerprint_item in "${derivative_signing_key_fingerprint_list[@]}"; do
+      if [ "${fingerprint}" = "${derivative_signing_key_fingerprint_item}" ]; then
+        true "INFO: fingerprint match, ok."
+        return 0
+      fi
+    done
+  done
+
+  1>&2 printf '%s\n' "\
+WARNING: Signing key fingerprint does not match!
+(INFO: If this is intentional, could:
+- A) preferably: add your own signing key, see file 'buildconfig.d/30_signing_key.conf'; or,
+- B) crude: out-comment this check.)"
+  return 1
+}
+
+verify_ref() {
+  local ref ref_type
+
+  ref="${1:-}"
+  ref_type="${2:-}"
+
+  if [ -z "${ref}" ]; then
+    error 'Cannot pass empty ref to verify_ref!'
+  fi
+  if [ -z "${ref_type}" ]; then
+    error 'Cannot pass empty ref_type to verify_ref!'
+  fi
+  case "${ref_type}" in
+    tag|commit)
+      true "INFO: ref_type: tag or commit."
+      ;;
+    *)
+      error "ref_type must be one of 'tag' or 'commit'!"
+      ;;
+  esac
+
+  ## Policy: All git commits (at least HEAD) is always signed.
+  git verify-commit -- "${ref}^{commit}" || return 1
+  signed_by_fingerprint "${ref}^{commit}" || return 1
+
+  if [ "${ref_type}" = 'tag' ]; then
+    ## Policy: All git tags are always signed.
+    ##
+    ## NOTE: 'refs/tags/' is necessary to prevent ambiguity in the event of a
+    ## tag with the same name as a branch or commit.
+    git verify-tag -- "refs/tags/${ref}" || return 1
+    signed_by_fingerprint "${ref}" || return 1
+  fi
 }
 
 git_sanity_test_hint() {
-   true "${cyan}$BASH_SOURCE INFO: (As a developer or advanced user you might want to use:)${reset}
+   true "${cyan}$BASH_SOURCE INFO: As a developer or advanced user you might want to use:${reset}
+${cyan}${under}WARNING:${eunder}${reset} This can be ${under}insecure${eunder} if you are unable to audit the uncommitted changes.
 ${bold}${under}--allow-untagged true${eunder} ${under}--allow-uncommitted true${eunder}${reset}
 "
+}
+
+git_submodule_uncommitted_check() {
+   readarray -t submodule_path_list < <(
+      grep --fixed-strings 'path =' -- '.gitmodules' | awk -- '{ print $3 }'
+   )
+   for submodule_path_item in "${submodule_path_list[@]}"; do
+      ## grep would be better in so far that it supports '--fixed-strings'.
+      ## In the worst case, special characters might cause a spurious error message.
+      ## Hence, preferring speed (bash built-in string matching) over external utility 'grep'.
+      #if grep --fixed-strings -- "$submodule_path_item" &>/dev/null <<< "$git_status_str"; then
+      # shellcheck disable=SC2076
+      if [[ "${git_status_str}" =~ "${submodule_path_item}" ]]; then
+         printf '%s\n' "${cyan}INFO: Uncommitted changes detected in git submodule: '${under}${submodule_path_item}${eunder}'  ${reset}"
+      fi
+   done
 }
 
 git_sanity_test_check_for_untagged_commits() {
    git_tag_nearest="$(git describe --always --abbrev=0)"
    git_tag_current="$(git describe --always --abbrev=1000000000)"
+   git_tag_exact="$(git describe --exact-match --tags 2>/dev/null)" || true
 
    ## Example git_tag_nearest:
    ## 9.6
@@ -84,62 +150,90 @@ git_sanity_test_check_for_untagged_commits() {
    true "${cyan}$BASH_SOURCE INFO: git_tag_current: $git_tag_current ${reset}"
 
    if [ "$git_tag_nearest" == "$git_tag_current" ]; then
-      true "${cyan}$BASH_SOURCE INFO: Git reports tagged commit. ${reset}"
-   else
-      if [ "$dist_build_ignore_untagged" = "true" ]; then
-         true "${bold}${cyan}$BASH_SOURCE INFO: Git reports a untagged commit! But you requested to ignore untagged commits, continuing... ${reset}"
-      else
-         true "${bold}${red}---------------------------------------------------------------------${reset}"
-         true "${bold}${red}$BASH_SOURCE ERROR: Git reports a untagged commit! ${reset}"
-         true "${cyan}$BASH_SOURCE INFO: (And you are not using ${under}--allow-untagged true${eunder}, \
-which you also should not do for security reasons, unless you are a developer or advanced user and know what you are doing. \
-Such as in case you added custom commits.) ${reset}"
-         git_sanity_test_hint
-         true "${cyan}$BASH_SOURCE INFO: (See build documentation on how to verify and checkout git tags.)${reset}"
-         true "${bold}${red}---------------------------------------------------------------------${reset}"
-
-         error "Untagged commit! See above!"
-         true
+      true "${cyan}$BASH_SOURCE INFO: git_tag_nearest equals git_tag_current. ${reset}"
+      if [ "$git_tag_current" == "$git_tag_exact" ]; then
+         true "${cyan}$BASH_SOURCE INFO: git_tag_current equals git_tag_exact. ${reset}"
+         true "${cyan}$BASH_SOURCE INFO: Git reports tagged commit. ${reset}"
+         if ! verify_ref "${git_tag_exact}" 'tag'; then
+            error "git tag is not signed by known fingerprint."
+         fi
+         return 0
       fi
    fi
+
+   if [ "$dist_build_ignore_untagged" = "true" ]; then
+      true "${bold}${cyan}$BASH_SOURCE INFO: Git reports a untagged commit! But you requested to ignore untagged commits, continuing... ${reset}"
+      return 0
+   fi
+
+   true "${bold}${red}---------------------------------------------------------------------${reset}"
+   true "${bold}${red}$BASH_SOURCE ERROR: Git reports an untagged commit! ${reset}"
+   true "${cyan}$BASH_SOURCE INFO: (And you are not using ${under}--allow-untagged true${eunder}, \
+which you also should not do for security reasons, unless you are a developer or advanced user and know what you are doing. \
+Such as in case you added custom commits.) ${reset}"
+   git_sanity_test_hint
+   true "${cyan}$BASH_SOURCE INFO: (See build documentation on how to verify and checkout git tags.)${reset}"
+   true "${bold}${red}---------------------------------------------------------------------${reset}"
+
+   error "Untagged commit! See above!"
+   true
 }
 
 git_sanity_test_check_for_uncommitted_changes() {
-   if [ -n "$(git status --porcelain)" ]; then
-      if [ "$dist_build_ignore_uncommitted" = "true" ]; then
-         true "${bold}${cyan}$BASH_SOURCE INFO: Git reports uncommitted changes! But you requested to ignore uncommitted changes, continuing... ${reset}"
-         true "${cyan}$BASH_SOURCE INFO: Running \"git status\" for debugging. ${reset}"
-         git status
-         true "${cyan}$BASH_SOURCE INFO: Running git \"clean -d --force --force --dry-run\" for debugging. ${reset}"
-         git clean -d --force --force --dry-run
-         true
-      else
-         true "${bold}${red}---------------------------------------------------------------------${reset}"
-         true "${bold}${red}$BASH_SOURCE ERROR: Git reports uncommitted changes! ${reset}"
-         true "${cyan}$BASH_SOURCE INFO: (And you are not using ${under}--allow-uncommitted true${eunder}, \
+   local git_status_str
+   git_status_str="$(git status --porcelain=v1 2>&1)" || error "'git status --porcelain=v1' failed."
+
+   if [ -z "$git_status_str" ]; then
+      true "INFO: No uncommitted changes found, ok."
+      return 0
+   fi
+
+   if [ "$dist_build_ignore_uncommitted" = "true" ]; then
+      true "${bold}${cyan}$BASH_SOURCE INFO: Git reports uncommitted changes! But you requested to ignore uncommitted changes, continuing... ${reset}"
+      git_sanity_test_hint
+      true "${cyan}$BASH_SOURCE INFO: Running \"git status\" for debugging. ${reset}"
+      git status
+      true "${cyan}$BASH_SOURCE INFO: Running git \"clean -d --force --force --dry-run\" for debugging. ${reset}"
+      git clean -d --force --force --dry-run
+      true
+      return 0
+   fi
+
+   true "${bold}${red}---------------------------------------------------------------------${reset}"
+   true "${bold}${red}$BASH_SOURCE ERROR: Git reports uncommitted changes! ${reset}"
+   true "${cyan}$BASH_SOURCE INFO: (And you are not using ${under}--allow-uncommitted true${eunder}, \
 which you also should not do for security reasons, unless you are a developer or advanced user and know what you are doing. \
 Such as in case you added custom code.) ${reset}"
-         git_sanity_test_hint
-         true "${cyan}$BASH_SOURCE INFO: Running \"git status\" for your convenience. ${reset}"
-         git status
-         true "${cyan}$BASH_SOURCE INFO: Running git \"clean -d --force --force --dry-run\" for your convenience. ${reset}"
-         git clean -d --force --force --dry-run
-         true "${cyan}$BASH_SOURCE You most likely like to run:${reset}
-    ${under}$dist_source_help_steps_folder/cleanup-files${eunder}
+   git_sanity_test_hint
+   true "${cyan}$BASH_SOURCE INFO: Running \"git status\" for your convenience. ${reset}"
+   git status
+   ## Use '2>/dev/null' to hide xtrace.
+   git_submodule_uncommitted_check 2>/dev/null
+   true "${cyan}$BASH_SOURCE INFO: Running git \"clean -d --force --force --dry-run\" for your convenience. ${reset}"
+   git clean -d --force --force --dry-run
+   true "${cyan}$BASH_SOURCE You most likely like to run:${reset}
+${under}$dist_source_help_steps_folder/cleanup-files${eunder}
 ${cyan}or if you know what you are doing:${reset}
-    ${under}git clean -d --force --force${eunder}
-    ${under}git reset --hard${eunder}
+${under}git clean -d --force --force${eunder}
+${under}git reset --hard${eunder}
 "
-         true "${bold}${red}---------------------------------------------------------------------${reset}"
+   true "${bold}${red}---------------------------------------------------------------------${reset}"
 
-         error "Uncommitted changes! See above!"
-         true
-      fi
-   fi
+   error "Uncommitted changes! See above!"
+   true
 }
 
 git_sanity_test_main() {
-   git_sanity_test_parse_cmd "$@"
+   ## Import any additional needed GPG keys.
+   import_keys
+
+   ## Sanity-check; verify the signature of the current ref. If the user has
+   ## never verified the repo before, this can be bypassed if the repo is
+   ## compromised, but if the repo is safe, this (in combination with the key
+   ## import above) will do the initial verification, providing "trust on first
+   ## use" (TOFU) security.
+   verify_ref "${dist_build_current_git_head}" 'commit'
+
    git_sanity_test_check_for_untagged_commits
    git_sanity_test_check_for_uncommitted_changes
 }

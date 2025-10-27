@@ -1,0 +1,28 @@
+#!/bin/bash
+
+## Copyright (C) 2025 - 2025 ENCRYPTED SUPPORT LLC <adrelanos@whonix.org>
+## See the file COPYING for copying conditions.
+
+## This script is executed from within the container with the purpose of verifying
+## a chosen or the latest available tag, before initiating the build process.
+##
+## GIT=true - run 'git pull'
+
+set -x
+set -o errexit
+set -o nounset
+set -o errtrace
+set -o pipefail
+
+SOURCE_DIR="${HOME}/derivative-maker"
+BINARY_DIR="${HOME}/derivative-binary"
+LOG_DIR="${BINARY_DIR}/logs"
+BUILD_LOG="${LOG_DIR}/build.log"
+
+mkdir --parents -- "${BINARY_DIR}" "${LOG_DIR}"
+
+chown --recursive -- "${USER}:${USER}" "${LOG_DIR}"
+
+cd -- "${SOURCE_DIR}"
+
+"$@" 2>&1 | tee -a -- "${BUILD_LOG}"

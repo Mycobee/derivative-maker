@@ -4,24 +4,24 @@
 ## See the file COPYING for copying conditions.
 
 implicit_dist_type_vm() {
-   if echo "${args[@]}" | grep --quiet --fixed-string -- "--type" ; then
+   if printf '%s\n' "${args[@]}" | grep --fixed-strings -- "--type" &>/dev/null; then
       return 0
    fi
    if [ ! "$dist_build_type" = "" ]; then
       return 0
    fi
-   echo "${cyan}INFO: implicitly setting '--type vm' because using '$1'.${reset}"
+   echo "INFO: implicitly setting '--type vm' because using '$1'."
    dist_build_type="vm"
 }
 
 implicit_dist_type_host() {
-   if echo "${args[@]}" | grep --quiet --fixed-string -- "--type" ; then
+   if printf '%s\n' "${args[@]}" | grep --fixed-strings -- "--type" &>/dev/null; then
       return 0
    fi
    if [ ! "$dist_build_type" = "" ]; then
       return 0
    fi
-   echo "${cyan}INFO: implicitly setting '--type host' because using '$1'.${reset}"
+   echo "INFO: implicitly setting '--type host' because using '$1'."
    dist_build_type="host"
 }
 
@@ -37,23 +37,31 @@ parse_cmd_target_error() {
 
 parse_cmd_flavor_error() {
    echo "${red}${bold}You must add either:
---flavor whonix-gateway-xfce
+--flavor whonix-gateway-lxqt
 --flavor whonix-gateway-rpi
 --flavor whonix-gateway-cli
---flavor whonix-workstation-xfce
+--flavor whonix-workstation-lxqt
 --flavor whonix-workstation-cli
 --flavor whonix-custom-workstation
---flavor whonix-host-xfce
+--flavor whonix-host-lxqt
 --flavor whonix-host-cli
 --flavor kicksecure-cli
---flavor kicksecure-xfce
+--flavor kicksecure-lxqt
 --flavor dist-installer-cli
 ${reset}"
    exit 1
 }
 
 dist_build_one_script_help() {
-   echo "\
+   local cmd_name
+
+   cmd_name="${1:-}";
+   if [ -n "${cmd_name}" ]; then
+      cmd_name="$(basename "$(realpath "${cmd_name}")")"
+   fi
+
+   if [ "${cmd_name}" = 'derivative-maker' ]; then
+      printf '%s\n' "\
 derivative-maker
 
 Syntax:
@@ -67,16 +75,16 @@ Description:
 Flavors:
   --flavor [flavor_option]
   Options:
-    whonix-gateway-xfce         : Builds Whonix-Gateway Xfce VM.
+    whonix-gateway-lxqt         : Builds Whonix-Gateway LXQt VM.
     whonix-gateway-rpi          : Builds Whonix-Gateway CLI RPi 3 VM.
     whonix-gateway-cli          : Builds Whonix-Gateway CLI VM.
-    whonix-workstation-xfce     : Builds Whonix-Workstation Xfce VM.
+    whonix-workstation-lxqt     : Builds Whonix-Workstation LXQt VM.
     whonix-workstation-cli      : Builds Whonix-Workstation CLI VM.
     whonix-custom-workstation   : Builds Whonix-Custom-Workstation VM.
     whonix-host-cli             : Builds Whonix-Host CLI.
-    whonix-host-xfce            : Builds Whonix-Host Xfce.
+    whonix-host-lxqt            : Builds Whonix-Host LXQt.
     kicksecure-cli              : Builds Kicksecure VM CLI VM.
-    kicksecure-xfce             : Builds Kicksecure VM Xfce VM.
+    kicksecure-lxqt             : Builds Kicksecure VM LXQt VM.
 
 Targets:
   --target [target_option]
@@ -110,7 +118,7 @@ Environment Variables:
   - flavor_meta_packages_to_install: Define meta packages to be installed.
     Examples:
       flavor_meta_packages_to_install='none'
-      flavor_meta_packages_to_install='non-qubes-vm-enhancements-cli kicksecure-dependencies-cli whonix-shared-packages-dependencies-cli whonix-gateway-packages-dependencies-cli'
+      flavor_meta_packages_to_install='kicksecure-baremetal-gui-lxqt kicksecure-baremetal-server'
 
   - install_package_list: Specify additional custom packages for installation.
     Examples:
@@ -122,7 +130,16 @@ Environment Variables:
       DERIVATIVE_APT_REPOSITORY_OPTS='--enable --repository stable'
       DERIVATIVE_APT_REPOSITORY_OPTS='--enable --repository testers'
       DERIVATIVE_APT_REPOSITORY_OPTS='--enable --repository developers'
-      DERIVATIVE_APT_REPOSITORY_OPTS='--enable --codename bookworm'
+      DERIVATIVE_APT_REPOSITORY_OPTS='--enable --codename trixie'
+
+   - vm_names_to_be_exported: Specify for unified images which images to combine.
+    Default:
+      For CLI:
+        vm_names_to_be_exported='Whonix-Gateway-CLI Whonix-Workstation-CLI'
+      For LXQt:
+        vm_names_to_be_exported='Whonix-Gateway-LXQt Whonix-Workstation-LXQt'
+    Examples mixing CLI gateway with LXQt workstation:
+        vm_names_to_be_exported='Whonix-Gateway-CLI Whonix-Workstation-LXQt'
 
 Advanced Options:
   --report [true|false]           : Enable or disable build reports (default: false).
@@ -137,13 +154,14 @@ Advanced Options:
   --kernel [packages]             : Specify kernel packages (e.g., 'linux-image-amd64' or 'none').
   --headers [packages]            : Specify kernel header packages.
   --remote-derivative-packages    : Choose to use remote derivative packages instead of building derivative packages from source code. (default: false).
-  --release [unsupported_option]  : Set release option (unsupported). (bookworm|xenial|bionic)
+  --release [unsupported_option]  : Set release option (unsupported). (trixie|bookworm|xenial|bionic)
   --arch [architecture]           : Set architecture (e.g., i386, amd64, kfreebsd-i386, kfreebsd-amd64) (default: amd64).
   (Note: amd64 also works with most Intel CPUs.)
   --debug                         : Does not disable verbose/debug (xtrace) during help-steps pre, variables and parse-cmd.
+  --dry-run [true|false]          : Does not actually build real images. Just an empty text file. Useful for debugging dm-prepare-release script.
 
 For VMs only:
-  --initramfs [packages]          : Specify initramfs packages. (none, initramfs-tools) (default: \$BUILD_INITRAMFS_PKGS)
+  --initramfs [packages]          : Specify initramfs packages. (default: \$BUILD_INITRAMFS_PKGS)
 
 Configuration Files:
   --confdir [/path/to/config/dir] : Specify an additional configuration directory.
@@ -160,7 +178,27 @@ Miscellaneous:
 
 Please use the options as per your requirements. For any assistance, refer to the full documentation.
 "
-    exit 0
+   elif [ "${cmd_name}" = 'derivative-update' ]; then
+      printf '%s\n' "\
+derivative-update
+
+Syntax:
+  (-t|--tag|-r|--ref ref)
+
+Description:
+  Updates the derivative-maker repository to the specified ref in a secure
+  fashion. Imports the derivative-maker signing keys if they are not already
+  imported into GPG. Fetches new commits and refs from the remote repository.
+
+Parameters:
+  -t|--tag                   : Check out the specified tag. Specify 'latest'
+                               to check out the most recently created tag in
+                               the repository.
+  -r|--ref                   : Check out the specified branch.
+  -u|--update-only           : No check out. Update git submodules only.
+"
+   fi
+   exit 0
 }
 
 dist_build_one_parse_cmd() {
@@ -182,23 +220,29 @@ dist_build_one_parse_cmd() {
    ## Using export, so scripts run by run-parts (run by derivative-maker) can read
    ## these variables.
 
+   ## Note, short and combined options such as '-tpu' are unsupported and not planned.
    while :
    do
        case $1 in
            -h | --help | -\?)
-               dist_build_one_script_help
+               if [ "${BASH_SOURCE}" != "${0}" ]; then
+                   ## Script was sourced.
+                   dist_build_one_script_help "$0"
+               else
+                   dist_build_one_script_help "derivative-maker"
+               fi
                ;;
            --flavor)
                true "${cyan}INFO: --flavor $2 chosen.${reset}"
                dist_build_flavor="$2"
                export dist_build_flavor
-               if [ "$dist_build_flavor" = "whonix-gateway-xfce" ]; then
+               if [ "$dist_build_flavor" = "whonix-gateway-lxqt" ]; then
                   build_machines_counter="$(( $build_machines_counter + 1 ))"
                elif [ "$dist_build_flavor" = "whonix-gateway-rpi" ]; then
                   build_machines_counter="$(( $build_machines_counter + 1 ))"
                elif [ "$dist_build_flavor" = "whonix-gateway-cli" ]; then
                   build_machines_counter="$(( $build_machines_counter + 1 ))"
-               elif [ "$dist_build_flavor" = "whonix-workstation-xfce" ]; then
+               elif [ "$dist_build_flavor" = "whonix-workstation-lxqt" ]; then
                   build_machines_counter="$(( $build_machines_counter + 1 ))"
                elif [ "$dist_build_flavor" = "whonix-workstation-cli" ]; then
                   build_machines_counter="$(( $build_machines_counter + 1 ))"
@@ -206,11 +250,11 @@ dist_build_one_parse_cmd() {
                   build_machines_counter="$(( $build_machines_counter + 1 ))"
                elif [ "$dist_build_flavor" = "whonix-host-cli" ]; then
                   build_machines_counter="$(( $build_machines_counter + 1 ))"
-               elif [ "$dist_build_flavor" = "whonix-host-xfce" ]; then
+               elif [ "$dist_build_flavor" = "whonix-host-lxqt" ]; then
                   build_machines_counter="$(( $build_machines_counter + 1 ))"
                elif [ "$dist_build_flavor" = "kicksecure-cli" ]; then
                   build_machines_counter="$(( $build_machines_counter + 1 ))"
-               elif [ "$dist_build_flavor" = "kicksecure-xfce" ]; then
+               elif [ "$dist_build_flavor" = "kicksecure-lxqt" ]; then
                   build_machines_counter="$(( $build_machines_counter + 1 ))"
                elif [ "$dist_build_flavor" = "dist-installer-cli" ]; then
                   build_machines_counter="$(( $build_machines_counter + 1 ))"
@@ -360,7 +404,7 @@ dist_build_one_parse_cmd() {
                ;;
            ## TODO
            --testing-frozen-sources)
-               export dist_build_sources_list_primary="build_sources/debian_testing_frozen.list"
+               export dist_build_sources_list_primary="build_sources/debian_testing_frozen.sources"
                shift
                ;;
            --debug)
@@ -630,6 +674,18 @@ dist_build_one_parse_cmd() {
                export build_freedom_only
                shift 2
                ;;
+            -t|--tag)
+               target_tag="$2"
+               shift 2
+               ;;
+            -r|--ref)
+               target_ref="$2"
+               shift 2
+               ;;
+            -u|--update-only)
+               update_only="true"
+               shift 1
+               ;;
            --function)
                if [ "$2" = "" ]; then
                   echo "${red}${bold}ERROR: --function may not be empty.${reset}"
@@ -645,21 +701,29 @@ dist_build_one_parse_cmd() {
                break
                ;;
            -*)
-               echo "${red}${bold}unknown option (1): '$1'${reset}"
-               exit 1
+               if ! [ "$dist_build_internal_run" = "true" ]; then
+                  echo "${red}${bold}unknown option (1): '$1'${reset}"
+                  exit 1
+               fi
                break
                ;;
            *)
                if [ "$1" = "" ]; then
                   true
                else
-                  echo "${red}${bold}unknown option (2): '$1'${reset}"
-                  exit 1
+                  if ! [ "$dist_build_internal_run" = "true" ]; then
+                     echo "${red}${bold}unknown option (2): '$1'${reset}"
+                     exit 1
+                  fi
                fi
                break
                ;;
        esac
    done
+
+   [[ -v target_tag ]] || target_tag=""
+   [[ -v target_ref ]] || target_ref=""
+   [[ -v update_only ]] || update_only=""
 
    if [ "$dist_build_target_arch" = "i386" ]; then
       [ -n "$virtualbox_suppported_architecture" ] || virtualbox_suppported_architecture="true"
@@ -678,11 +742,11 @@ dist_build_one_parse_cmd() {
          error "\
 ${red}${bold}VirtualBox architecture support test failed!
 virtualbox_suppported_architecture: '$virtualbox_suppported_architecture'
-dist_build_target_arch is not 'amd64'.
+dist_build_target_arch is not 'i386', 'amd64' or 'arm64'.
 dist_build_target_arch is '$dist_build_target_arch'.
-You cannot build '--target virtualbox' if not using 'arch i386' or '--arch amd64'.
-This is because at time of writing this check, VirtualBox supports 'i386' and 'amd64' only.
-Should VirtualBox meanwhile support other architectures such as 'arm64', then this check can simply be removed in the source code.${reset}"
+You cannot build '--target virtualbox' if not using '--arch i386', '--arch amd64' or '--arch arm64'.
+This is because at time of writing this check, VirtualBox supports 'i386', 'amd64' and 'arm64' only.
+Should VirtualBox meanwhile support other architectures such as 'ppc64el', then this check can simply be removed in the source code.${reset}"
       fi
    fi
 

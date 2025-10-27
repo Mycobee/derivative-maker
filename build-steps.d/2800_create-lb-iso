@@ -42,13 +42,15 @@ create-live-build-image() {
 
    ## Install basic live-build configuration
    live_build_localrepo_location=""
-   live_build_localrepo_list=""
+   live_build_localrepo_suite=""
+   live_build_localrepo_components=""
 
    if [ "${build_remote_derivative_pkgs}" != 'true' ]; then
       derivative_repository_name='kicksecure'
       set_dist_build_reprepro_folder_options
       live_build_localrepo_location="${dist_apt_repository_folder}"
-      live_build_localrepo_list="local main contrib non-free"
+      live_build_localrepo_suite="local"
+      live_build_localrepo_components="main contrib non-free"
    fi
 
    $SUDO_TO_ROOT lb clean # In case there's a leftover build tree present.
@@ -89,23 +91,61 @@ create-live-build-image() {
    live_build_initramfs_type=''
    if [[ "${BUILD_INITRAMFS_PKGS}" =~ 'dracut' ]]; then
       live_build_initramfs_type='dracut-live'
-   elif [[ "${BUILD_INITRAMFS_PKGS}" =~ 'initramfs-tools' ]]; then
-      live_build_initramfs_type='live-boot'
    else
       true "${red}${bold}WARNING:${reset} ${under}The ISO to be built might be unbootable!${eunder}
-- This is because the initramfs type has been set to 'none'.
-- Please leave the initramfs type unset to default to dracut, or set it to
-  initramfs-tools to use initramfs-tools and live-boot instead."
+- This is because the initramfs type has been set to 'none' or is not recognized.
+- Please leave the initramfs type unset (which will default to dracut), or
+  explicitly set it to the set of dracut packages you want. Other initramfs
+  systems are not supported."
       live_build_initramfs_type='none'
    fi
 
-   echo "#!/bin/sh
+   live_build_bootstrap_mirror_file="$(mktemp)"
+   live_build_bootstrap_mirror_security_file="$(mktemp)"
+   live_build_parent_bootstrap_mirror_file="$(mktemp)"
+   live_build_parent_bootstrap_mirror_security_file="$(mktemp)"
+
+   printf '%s\n' "\
+Types: deb
+URIs: ${dist_build_apt_sources_mirror}
+Suites: ${dist_build_apt_stable_release}
+Components: main
+Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg" \
+      | sponge "${live_build_bootstrap_mirror_file}"
+   printf '%s\n' "\
+Types: deb
+URIs: ${dist_build_apt_sources_security_mirror}
+Suites: ${dist_build_apt_stable_release}-security
+Components: main
+Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg" \
+      | sponge "${live_build_bootstrap_mirror_security_file}"
+   printf '%s\n' "\
+Types: deb
+URIs: ${dist_build_apt_sources_mirror}
+Suites: ${dist_build_apt_stable_release}
+Components: main
+Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg" \
+      | sponge "${live_build_parent_bootstrap_mirror_file}"
+   printf '%s\n' "\
+Types: deb
+URIs: ${dist_build_apt_sources_security_mirror}
+Suites: ${dist_build_apt_stable_release}-security
+Components: main
+Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg" \
+      | sponge "${live_build_parent_bootstrap_mirror_security_file}"
+
+   ## TODO: Should quote...? ${APTGETOPT[*]}
+
+   ## NOTE: If changing '--bootappend-live' parameter 'rd.live.overlay.overlayfs=1'
+   ##       also update at the same time grub-live:
+   ##       /usr/lib/systemd/system/systemd-repart.service.d/30_grub-live.conf
+
+   printf '%s\n' "#!/bin/sh
 
 set -e
 
 lb config noauto \\
    --apt apt-get \\
-   --apt-http-proxy '${REPO_PROXY}' \\
    --apt-indices false \\
    --apt-options '${APTGETOPT[*]} --yes --allow-remove-essential' \\
    --apt-recommends false \\
@@ -135,15 +175,15 @@ lb config noauto \\
    --memtest 'memtest86+' \\
    --mirror-binary '${dist_build_apt_sources_mirror}' \\
    --mirror-binary-security '${dist_build_apt_sources_security_mirror}' \\
-   --mirror-bootstrap 'deb ${dist_build_apt_sources_mirror} ${dist_build_apt_stable_release} main' \\
-   --mirror-bootstrap-security 'deb ${dist_build_apt_sources_security_mirror} ${dist_build_apt_stable_release}-security main' \\
+   --mirror-bootstrap '${live_build_bootstrap_mirror_file}' \\
+   --mirror-bootstrap-security '${live_build_bootstrap_mirror_security_file}' \\
    --mirror-chroot '${dist_build_apt_sources_mirror}' \\
    --mirror-chroot-security '${dist_build_apt_sources_security_mirror}' \\
    --mirror-debian-installer '${dist_build_apt_sources_mirror}' \\
    --parent-mirror-binary '${dist_build_apt_sources_mirror}' \\
    --parent-mirror-binary-security '${dist_build_apt_sources_security_mirror}' \\
-   --parent-mirror-bootstrap 'deb ${dist_build_apt_sources_mirror} ${dist_build_apt_stable_release} main' \\
-   --parent-mirror-bootstrap-security 'deb ${dist_build_apt_sources_security_mirror} ${dist_build_apt_stable_release}-security main' \\
+   --parent-mirror-bootstrap '${live_build_parent_bootstrap_mirror_file}' \\
+   --parent-mirror-bootstrap-security '${live_build_parent_bootstrap_mirror_security_file}' \\
    --parent-mirror-chroot '${dist_build_apt_sources_mirror}' \\
    --parent-mirror-chroot-security '${dist_build_apt_sources_security_mirror}' \\
    --parent-mirror-debian-installer '${dist_build_apt_sources_mirror}' \\
@@ -155,6 +195,9 @@ lb config noauto \\
    ${live_build_arch_specific_config} \\
    \"\${@}\"" \
    | sponge -- auto/config
+
+   ## Obsolete lb config options:
+   ## --apt-http-proxy '${REPO_PROXY}' # obsolete when using approx proxy
 
    chmod +x -- auto/config
 
@@ -173,19 +216,29 @@ lb config noauto \\
 
    ## Apt archives
    mkdir --parents -- archives
-   echo "deb http://HTTPS///fasttrack.debian.net/debian-fasttrack/ ${dist_build_apt_stable_release}-fasttrack main contrib" | sponge -- archives/fasttrack.list.chroot
+   printf '%s\n' "Types: deb
+URIs: http://127.0.0.1:9977/debian-fasttrack/
+Suites: ${dist_build_apt_stable_release}-fasttrack
+Components: main contrib
+Enabled: yes
+Signed-By: /usr/share/keyrings/fasttrack-archive-keyring.gpg" | sponge -- archives/fasttrack.sources.chroot
    if [ "${build_remote_derivative_pkgs}" = 'true' ]; then
-      echo "$sources_list_build_remote_derivative" | sponge -- archives/derivative-temp.list.chroot
+      printf '%s\n' "$sources_list_build_remote_derivative" | sponge -- archives/derivative-temp.sources.chroot
       cp -- "${source_code_folder_dist}/packages/kicksecure/repository-dist/usr/share/keyrings/derivative.asc" archives/derivative-temp.key.chroot
    else
-      echo "deb [trusted=yes] file://${live_build_localrepo_location} ${live_build_localrepo_list}" > archives/derivative-localrepo.list.chroot
+      printf '%s\n' "Types: deb
+URIs: file://$(readlink -f "${live_build_localrepo_location}")
+Suites: ${live_build_localrepo_suite}
+Components: ${live_build_localrepo_components}
+Enabled: yes
+Trusted: yes" > archives/derivative-localrepo.sources.chroot
    fi
 
    ## Apt configuration
    live_build_package_pins="Package: calamares
 Pin: release n=${dist_build_apt_stable_release}-backports
 Pin-Priority: 900"
-   echo "${live_build_package_pins}" | sponge -- archives/z-kicksecure.pref.chroot
+   printf '%s\n' "${live_build_package_pins}" | sponge -- archives/z-kicksecure.pref.chroot
 
    ## Package lists
    mkdir --parents -- package-lists
@@ -202,7 +255,7 @@ Pin-Priority: 900"
       armel|mipsel|mips64el|riscv64)
          ## firmware-nonfreedom unsupported because of intel-microcode and amd64-microcode
          ## no VirtualBox utilities
-         ## no supoprt for livepatch, thus doesn't support tirdad
+         ## no support for livepatch, thus doesn't support tirdad
          ## no signed fwupd
          ## no grub-pc
          ## no shim-signed
@@ -218,7 +271,7 @@ Pin-Priority: 900"
       armhf)
          ## firmware-nonfreedom unsupported because of intel-microcode and amd64-microcode
          ## no VirtualBox utilities
-         ## no supoprt for livepatch, thus doesn't support tirdad
+         ## no support for livepatch, thus doesn't support tirdad
          ## has signed fwupd
          ## no grub-pc
          ## no shim-signed
@@ -234,7 +287,7 @@ Pin-Priority: 900"
       arm64)
          ## firmware-nonfreedom unsupported because of intel-microcode and amd64-microcode
          ## no VirtualBox utilities
-         ## no supoprt for livepatch, thus doesn't support tirdad
+         ## no support for livepatch, thus doesn't support tirdad
          ## has signed fwupd
          ## no grub-pc
          ## has shim-signed
@@ -264,16 +317,18 @@ Pin-Priority: 900"
          sed -i 's/XXX_GRUB_EFI_SIGNED_XXX//' package-lists/z-kicksecure.list.chroot
          ;;
       i386)
+         ## TODO: Full i386 installations are officially unsupported on Debian Trixie and higher, remove this architecture?
          ## firmware-nonfreedom supported, intel-microcode and amd64-microcode both exist
          ## Yes, amd64-microcode exists on i386.
          ## VirtualBox utilities exist
-         ## no supoprt for livepatch, thus doesn't support tirdad
+         ## no support for livepatch, thus doesn't support tirdad
          ## has signed fwupd
          ## has grub-pc
          ## has shim-signed
          ## has signed grub-efi
          sed -i 's/XXX_FIRMWARE_XXX/firmware-nonfreedom/' package-lists/z-kicksecure.list.chroot
          sed -i 's/XXX_VIRTUALBOX_UTILS_XXX/virtualbox-guest-utils\nvirtualbox-guest-x11/' package-lists/z-kicksecure.list.chroot
+         sed -i 's/XXX_VIRTUALBOX_UTILS_XXX//' package-lists/z-kicksecure.list.chroot
          sed -i 's/XXX_DUMMY_TIRDAD_XXX/dummy-dependency-tirdad/' package-lists/z-kicksecure.list.chroot
          sed -i 's/XXX_FWUPD_SIGNED_XXX/fwupd-signed/' package-lists/z-kicksecure.list.chroot
          sed -i 's/XXX_GRUB_PC_XXX/grub-pc-bin/' package-lists/z-kicksecure.list.chroot
@@ -284,6 +339,7 @@ Pin-Priority: 900"
          ## Supports everything
          sed -i 's/XXX_FIRMWARE_XXX/firmware-nonfreedom/' package-lists/z-kicksecure.list.chroot
          sed -i 's/XXX_VIRTUALBOX_UTILS_XXX/virtualbox-guest-utils\nvirtualbox-guest-x11/' package-lists/z-kicksecure.list.chroot
+         sed -i 's/XXX_VIRTUALBOX_UTILS_XXX//' package-lists/z-kicksecure.list.chroot
          sed -i 's/XXX_DUMMY_TIRDAD_XXX//' package-lists/z-kicksecure.list.chroot
          sed -i 's/XXX_FWUPD_SIGNED_XXX/fwupd-signed/' package-lists/z-kicksecure.list.chroot
          sed -i 's/XXX_GRUB_PC_XXX/grub-pc-bin/' package-lists/z-kicksecure.list.chroot
@@ -293,14 +349,12 @@ Pin-Priority: 900"
    esac
 
    ## Example flavor_meta_packages_to_install:
-   ## non-qubes-vm-enhancements-cli kicksecure-dependencies-cli whonix-shared-packages-dependencies-cli whonix-gateway-packages-dependencies-cli
+   ## kicksecure-baremetal-gui-lxqt kicksecure-baremetal-server
 
    live_build_flavor_line_list="$(trim_collapse_split "${flavor_meta_packages_to_install}")"
    ## Example live_build_flavor_line_list:
-   ## non-qubes-vm-enhancements-cli \
-   ## kicksecure-dependencies-cli \
-   ## whonix-shared-packages-dependencies-cli \
-   ## whonix-gateway-packages-dependencies-cli
+   ## kicksecure-baremetal-gui-lxqt \
+   ## kicksecure-baremetal-server
 
    sed -i "s/XXX_KICKSECURE_HOST_XXX/${live_build_flavor_line_list}/" package-lists/z-kicksecure.list.chroot
 
@@ -326,7 +380,7 @@ Pin-Priority: 900"
    if [ "$build_dry_run" = "true" ]; then
       true "${bold}${cyan}INFO: Dry-run, skipping the rest of $BASH_SOURCE. ${reset}"
       ## Cannot be completely empty, or torrent creation would later fail during the prepare-release step.
-      echo "dummy" | sponge -- "${binary_image_iso_file}"
+      printf '%s\n' "dummy" | sponge -- "${binary_image_iso_file}"
       return 0
    fi
 
@@ -340,20 +394,31 @@ Pin-Priority: 900"
       error "${bold}${red}ERROR: Live build bootstrap stage failed!${reset}"
    fi
 
+   safe-rm -f -- "${live_build_bootstrap_mirror_file}"
+   safe-rm -f -- "${live_build_bootstrap_mirror_security_file}"
+   safe-rm -f -- "${live_build_parent_bootstrap_mirror_file}"
+   safe-rm -f -- "${live_build_parent_bootstrap_mirror_security_file}"
+
    ## TODO: Set this centrally in 'help-steps/variables'? Because 'help-steps/variables' already sets variable 'CHROOT_FOLDER'.
    CHROOT_FOLDER="$(realpath -- chroot)"
+   target_dracut_disable_config_snippet="$CHROOT_FOLDER/etc/dracut.conf.d/90-derivative-maker-build.conf"
 
    ## Keep security-misc from erroring out during installation
    $SUDO_TO_ROOT mkdir --parents -- "${CHROOT_FOLDER}/var/lib/security-misc"
    $SUDO_TO_ROOT touch "${CHROOT_FOLDER}/var/lib/security-misc/skip_install_check"
 
-   ## Make dist-base-files create a user as it should
+   ## Indicate to dist-base-files that its postinst script is running during a
+   ## live-build build
    $SUDO_TO_ROOT mkdir --parents -- "${CHROOT_FOLDER}/var/lib/dist-base-files"
    $SUDO_TO_ROOT touch "${CHROOT_FOLDER}/var/lib/dist-base-files/live_build"
 
    ## Ensure kernel is configured properly, we aren't using grml-debootstrap so we have to do this ourselves
    $SUDO_TO_ROOT mkdir --parents -- "${CHROOT_FOLDER}/etc"
    $SUDO_TO_ROOT cp -- "${source_code_folder_dist}/live-build-data/live-build-config/live_build_kernel_img_conf" "${CHROOT_FOLDER}/etc/kernel-img.conf"
+
+   ## Prevent needless initramfs builds.
+   $SUDO_TO_ROOT -- mkdir --parents -- "$CHROOT_FOLDER/etc/dracut.conf.d"
+   $SUDO_TO_ROOT -- cp --verbose -- "$source_dracut_disable_config_snippet" "$target_dracut_disable_config_snippet"
 
    ## Build ISO chroot
    if ! $SUDO_TO_ROOT lb chroot --verbose --debug; then
@@ -366,7 +431,7 @@ Pin-Priority: 900"
 
    if [ "${build_remote_derivative_pkgs}" = 'true' ]; then
       ## Deleting of temporary APT sources list file and keyring.
-      safe-rm -- config/archives/derivative-temp.list.chroot
+      safe-rm -- config/archives/derivative-temp.sources.chroot
       safe-rm -- config/archives/derivative-temp.key.chroot
    fi
 
@@ -407,8 +472,9 @@ Pin-Priority: 900"
    #    error "${bold}${red}ERROR: Live build debian-installer stage failed!${reset}"
    # fi
 
-   ## Get rid of a bad sources.list file, this has apt-cacher-ng junk embedded ('http://HTTPS///' / folder 'build_sources/')
-   $SUDO_TO_ROOT safe-rm -- "${CHROOT_FOLDER}/etc/apt/sources.list"
+   ## Get rid of bad sources files, they have approx proxy junk embedded ('http://127.0.0.1/debian' / folder 'build_sources/')
+   $SUDO_TO_ROOT safe-rm -f -- "${CHROOT_FOLDER}/etc/apt/sources.list"
+   $SUDO_TO_ROOT safe-rm -f -- "${CHROOT_FOLDER}/etc/apt/sources.list.d"/*
    ## Don't keep recommended packages from installing, apparently live-build's way of doing this ends up persistent!
    $SUDO_TO_ROOT safe-rm -- "${CHROOT_FOLDER}/etc/apt/apt.conf.d/00recommends"
    ## Don't force Dracut to make reproducible images, the default is to not use reproducible mode, this is most likely a live-build artifact
@@ -419,13 +485,11 @@ Pin-Priority: 900"
    $SUDO_TO_ROOT safe-rm -- "${CHROOT_FOLDER}/etc/udev/rules.d/70-persistent-cd.rules"
    ## We inserted this earlier to prevent security-misc from erroring out, but it could actually cause problems now, and it's no longer needed
    $SUDO_TO_ROOT safe-rm -- "${CHROOT_FOLDER}/var/lib/security-misc/skip_install_check"
-   ## This is similarly inserted to create a new user, but we don't need it any more and it could cause problems
-   $SUDO_TO_ROOT safe-rm -- "${CHROOT_FOLDER}/var/lib/dist-base-files/live_build"
 
    if [ "$(chroot_run dpkg-query --show --showformat='${Status}\n' anon-apt-sources-list)" = 'install ok installed' ]; then
-      ## 'live-build' appropriates file '/etc/apt/sources.list.d/debian.list' and then deletes it.
-      ## Restore the debian.list file.
-      $SUDO_TO_ROOT cp -- "${source_code_folder_dist}/packages/kicksecure/anon-apt-sources-list/etc/apt/sources.list.d/debian.list" "${CHROOT_FOLDER}/etc/apt/sources.list.d/debian.list"
+      ## '/etc/apt/sources.list.d/debian.sources' gets overwritten and then deleted during the build.
+      ## Restore the debian.sources file.
+      $SUDO_TO_ROOT cp -- "${source_code_folder_dist}/packages/kicksecure/anon-apt-sources-list/etc/apt/sources.list.d/debian.sources" "${CHROOT_FOLDER}/etc/apt/sources.list.d/debian.sources"
    fi
 
    ## Run chroot post-install scripts from initializer-dist, TODO consider moving these file removes to there?
@@ -434,6 +498,7 @@ Pin-Priority: 900"
    $SUDO_TO_ROOT mount --bind /dev/pts "${CHROOT_FOLDER}/dev/pts"
    $SUDO_TO_ROOT mount --bind /sys "${CHROOT_FOLDER}/sys"
    $SUDO_TO_ROOT mount --bind /proc "${CHROOT_FOLDER}/proc"
+   $SUDO_TO_ROOT mount -t tmpfs tmpfs "${CHROOT_FOLDER}/run"
 
    if [ -d "${CHROOT_FOLDER}/usr/libexec/initializer-dist/chroot-scripts-post.d" ]; then
       ## Check which chroot scripts we got.
@@ -449,14 +514,43 @@ Pin-Priority: 900"
 Not running any chroot scripts.${reset}"
    fi
 
+   ## This flag file was needed to change the behavior of dist-base-files and initializer-dist during build, it's now done being used.
+   $SUDO_TO_ROOT safe-rm -- "${CHROOT_FOLDER}/var/lib/dist-base-files/live_build"
+
    ## Network configuration
-   echo "${dist_build_hostname}" | $SUDO_TO_ROOT sponge -- chroot/etc/hostname
+   printf '%s\n' "${dist_build_hostname}" | $SUDO_TO_ROOT sponge -- chroot/etc/hostname
    $SUDO_TO_ROOT cp -- "${source_code_folder_dist}/live-build-data/live-build-config/live_build_etc_hosts" "${CHROOT_FOLDER}/etc/hosts"
+
+   ## Re-enable dracut initrd builds, then run dracut to build initrd.
+   $SUDO_TO_ROOT safe-rm --force --verbose -- "$target_dracut_disable_config_snippet"
+
+   ## For documentation on how to install dracut in a chroot, see:
+   ## https://github.com/dracutdevs/dracut/issues/1596
+
+   KERNELIMG="$(chroot_run ls -1 -- "/boot/")"
+   KERNELIMG="$(printf "%s\n" "$KERNELIMG" | grep "vmlinuz")"
+   KERNELIMG="$(printf "%s\n" "$KERNELIMG" | sed -n '1p')"
+   ## example KERNELIMG:
+   ## vmlinuz-6.1.0-9-amd64
+
+   KERNELVER="${KERNELIMG#vmlinuz-}"
+   ## example KERNELVER:
+   ## 6.1.0-9-amd64
+
+   chroot_run \
+      dracut \
+         --no-hostonly \
+         --kver "$KERNELVER" \
+         --force \
+         --reproducible \
+         --verbose \
+         $INITRD_GENERATOR_OPTS
 
    $SUDO_TO_ROOT umount "${CHROOT_FOLDER}/proc"
    $SUDO_TO_ROOT umount "${CHROOT_FOLDER}/sys"
    $SUDO_TO_ROOT umount "${CHROOT_FOLDER}/dev/pts"
    $SUDO_TO_ROOT umount "${CHROOT_FOLDER}/dev"
+   $SUDO_TO_ROOT umount "${CHROOT_FOLDER}/run"
 
    ## Package into an ISO
    if ! $SUDO_TO_ROOT lb binary --verbose --debug; then

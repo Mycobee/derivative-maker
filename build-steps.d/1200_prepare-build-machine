@@ -25,8 +25,9 @@ build_machine_setup() {
    ## https://github.com/QubesOS/qubes-issues/issues/1066
    $SUDO_TO_ROOT systemctl stop qubes-update-check.timer || true
    $SUDO_TO_ROOT systemctl stop qubes-update-check.service || true
+   ## 'safe-rm' not installed yet.
    ## https://github.com/QubesOS/qubes-issues/issues/1066#issuecomment-1987239106
-   $SUDO_TO_ROOT rm -f /etc/apt/apt.conf.d/00notify-hook
+   $SUDO_TO_ROOT rm -f -- "/etc/apt/apt.conf.d/00notify-hook"
 
    if [ "$dist_build_fast1" = "1" ]; then
       true "${bold}${cyan}INFO: run with '--fast 1' switch, skipping $BASH_SOURCE. ${reset}"
@@ -37,34 +38,34 @@ build_machine_setup() {
 
    ## TODO: Still needed?
    ## Check if user "$user_name" already exist.
-   local id_exit_code
-   id_exit_code="0"
-   id "$user_name" || { id_exit_code="$?" ; true; };
-   if [ "$id_exit_code" = "1" ]; then
-      true 'INFO: Creating user "$user_name" with password "changeme", because some things have to be run as "$user_name".'
-      if command -v qubesdb-read >/dev/null 2>&1 ; then
-         password=""
-      else
-         ## setting password of user clearnet to changeme
-         ##
-         ## How this password was created:
-         ## sudo apt-get install whois
-         ## mkpasswd
-         ## changeme
-         ## Resulted in: aTayYxVyw5kDo
-         password="aTayYxVyw5kDo"
-      fi
-      $SUDO_TO_ROOT useradd --password "$password" --user-group --create-home --shell /bin/bash "$user_name"
-   elif [ "$id_exit_code" = "0" ]; then
-      true "${cyan}INFO: Not creating user \"$user_name\" with password \"changeme\", because it already exists.${reset}"
-   else
-      true "${red}${bold}ERROR: id_exit_code was neither 1 or 0, it was: ${id_exit_code}${reset}"
-      error "See above!"
-   fi
+#    local id_exit_code
+#    id_exit_code="0"
+#    id "$user_name" || { id_exit_code="$?" ; true; };
+#    if [ "$id_exit_code" = "1" ]; then
+#       true 'INFO: Creating user "$user_name" with password "changeme", because some things have to be run as "$user_name".'
+#       if command -v qubesdb-read >/dev/null 2>&1 ; then
+#          password=""
+#       else
+#          ## setting password of user clearnet to changeme
+#          ##
+#          ## How this password was created:
+#          ## sudo apt-get install whois
+#          ## mkpasswd
+#          ## changeme
+#          ## Resulted in: aTayYxVyw5kDo
+#          password="aTayYxVyw5kDo"
+#       fi
+#       $SUDO_TO_ROOT useradd --password "$password" --user-group --create-home --shell /bin/bash "$user_name"
+#    elif [ "$id_exit_code" = "0" ]; then
+#       true "${cyan}INFO: Not creating user \"$user_name\" with password \"changeme\", because it already exists.${reset}"
+#    else
+#       true "${red}${bold}ERROR: id_exit_code was neither 1 or 0, it was: ${id_exit_code}${reset}"
+#       error "See above!"
+#    fi
 
    ## Add user to sudo group.
    ## TODO: Still needed?
-   $SUDO_TO_ROOT adduser "$user_name" sudo
+#    $SUDO_TO_ROOT adduser "$user_name" sudo
 
    ## }}
 
@@ -72,32 +73,36 @@ build_machine_setup() {
    true 'INFO: Benchmarking "$SUDO_TO_ROOT echo "This is a test echo." using "time"...'
    time $SUDO_TO_ROOT echo "This is a test echo."
 
-   true "INFO: Updating git sub modules..."
-
+   ## Nowadays done using: ./derivative-update
+   #true "INFO: Updating git sub modules..."
    ## Safe.
    ## Ensures submodules' remote URL configuration matches the values specified in .gitmodules.
-   git submodule sync --recursive
-
+   #git submodule sync --recursive
    ## Caution.
    ## This command updates Git submodules to the commit recorded in the parent repository. (derivative-maker)
    ## It modifies the submodule's Git HEAD, potentially overriding local changes.
    #git submodule update --init --recursive --jobs=200
-   git -c merge.verifySignatures=true submodule update --init --recursive --jobs=200 --merge
+   #git -c merge.verifySignatures=true submodule update --init --recursive --jobs=200 --merge
+   #true "INFO: Updated git sub modules."
 
-   true "INFO: Updated git sub modules."
+   ## Might be useful during port to Debian forky.
+   #$SUDO_TO_ROOT repository-dist --disable || true
+   #$SUDO_TO_ROOT safe-rm -f -- /etc/apt/sources.list.d/extrepo_kicksecure.sources
+   #$SUDO_TO_ROOT "$str_replace_many_tool" trixie forky /etc/apt/sources.list.d/* || true
 
    $SUDO_TO_ROOT \
       apt-get \
-         ${APTGETOPT[@]} \
+         "${APTGETOPT[@]}" \
          -o Dir::Etc::sourcelist="$dist_build_sources_list_primary" \
          -o Dir::Etc::sourceparts="-" \
          update
 
+   true "dist_build_upgrade_build_machine: $dist_build_upgrade_build_machine"
    if [ ! "$dist_build_upgrade_build_machine" = "0" ]; then
       ## Update package lists and upgrade.
       $SUDO_TO_ROOT \
          apt-get \
-            ${APTGETOPT[@]} \
+            "${APTGETOPT[@]}" \
             -o Dir::Etc::sourcelist="$dist_build_sources_list_primary" \
             -o Dir::Etc::sourceparts="-" \
             $apt_unattended_opts \
@@ -161,8 +166,6 @@ build_machine_setup() {
   systems's host_architecture.
 - Either the build script does not know how to install the required grub '-bin'
   package for this architecture or the package is simply unavailable.
-- Therefore ISO cross builds are unsupported. Patches welcome.
-  Might be possible to implement this by running image-to-iso using qemu.
 - There is also a small chance that host_architecture detection failed. (Using multiarch, wine?)"
       fi
    fi
@@ -194,7 +197,7 @@ build_machine_setup() {
 
    $SUDO_TO_ROOT \
       apt-get \
-         ${APTGETOPT[@]} \
+         "${APTGETOPT[@]}" \
          -o Dir::Etc::sourcelist="$dist_build_sources_list_primary" \
          -o Dir::Etc::sourceparts="-" \
          $apt_unattended_opts \
@@ -202,22 +205,6 @@ build_machine_setup() {
          --yes \
          install \
          $packages_to_be_installed
-
-   if [ "$dist_build_internal_run" = "true" ]; then
-      true
-   else
-      if [ "$dist_build_virtualbox" = "true" ]; then
-         ## VirtualBox will be be installed at this point.
-         "$dist_source_help_steps_folder/vm-exists-test" "$@"
-      fi
-   fi
-
-   if [ "$dist_build_iso" = "true" ]; then
-      pushd "$source_code_folder_dist/grml-debootstraptest" >/dev/null
-      ## Using sudo because some dependencies might only be available for root.
-      $SUDO_TO_ROOT "$source_code_folder_dist/grml-debootstraptest/image-to-iso" check_dependencies
-      popd >/dev/null
-   fi
 
    ## Debugging.
    $SUDO_TO_ROOT cat /usr/sbin/policy-rc.d || true
@@ -255,59 +242,55 @@ check-git-folder() {
    fi
 }
 
-repo_proxy_setup() {
-   if [ "$REPO_PROXY" = "" ]; then
-      return 0
-   fi
-   if [ "$REPO_PROXY" = "none" ]; then
-      return 0
-   fi
-   if [ ! "$REPO_PROXY" = "http://127.0.0.1:3142" ]; then
+approx_proxy_setup() {
+   if [ ! "$APPROX_PROXY_ENABLE" = "yes" ]; then
       return 0
    fi
 
-   if apt-cacher-ng_config_check firstcheck ; then
-      true "INFO: apt-cacher-ng_config_check ok."
-      return 0
-   fi
+   ## Install approx proxy configuration
+   $SUDO_TO_ROOT mkdir --parents -- '/etc/approx-derivative-maker'
+   $SUDO_TO_ROOT mkdir --parents -- '/var/cache/approx-derivative-maker'
+   $SUDO_TO_ROOT mkdir --parents -- '/etc/approx-derivative-maker/curl-home'
+   $SUDO_TO_ROOT chown --recursive -- approx:approx '/var/cache/approx-derivative-maker'
 
-   true "INFO: Adding 'AllowUserPorts: 0' to /etc/apt-cacher-ng/acng.conf"
+   ## Clear out empty files from the cache, approx uses these to mark files
+   ## that could not be fetched, which could cause problems for later builds
+   ## if the fetch failure was transient.
+   $SUDO_TO_ROOT find '/var/cache/approx-derivative-maker' -type f -empty -delete
 
-   ## Not possible because `append-once` requires `str_match`.
-   #$SUDO_TO_ROOT "$source_code_folder_dist/packages/kicksecure/helper-scripts/usr/bin/append-once" "/etc/apt-cacher-ng/acng.conf" "AllowUserPorts: 0"
-
-   ## Avoid apt-cacher-ng error:
-   ## > E: Failed to fetch http://HTTPS///deb.debian.org/debian-security/dists/bookworm-security/InRelease  403  Configuration error (confusing proxy mode) or prohibited port (see AllowUserPorts) [IP: 127.0.0.1 3142]
-   echo "AllowUserPorts: 0" | $SUDO_TO_ROOT tee -a "/etc/apt-cacher-ng/acng.conf" >/dev/null
-
-   ## Enable apt-cacher-ng HTTPS tunneling.
-   ## File /etc/apt-cacher-ng/zz_debconf.conf should already contain:
-   ## PassThroughPattern: .*
-   if ! grep --fixed-strings 'PassThroughPattern: .*' /etc/apt-cacher-ng/zz_debconf.conf ; then
-      echo 'PassThroughPattern: .*' | $SUDO_TO_ROOT tee -a "/etc/apt-cacher-ng/acng.conf" >/dev/null
-   fi
-
-   if [ "$APPLE_SILICON_BUILDER" = "true" ]; then
-     ## Find the process and kill it if running.
-     PID="$(pgrep -f "apt-cacher-ng")"
-
-     if [ -n "$PID" ]; then
-       $SUDO_TO_ROOT kill "$PID"
+   ## Clear out repository metadata from the cache, approx handles it poorly.
+   ## Debian bug report:
+   ## Unable to detect when local and remote metadata no longer matches
+   ## https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=1118031
+   #$SUDO_TO_ROOT find '/var/cache/approx-derivative-maker' -type f -name InRelease -delete
+   local repo_dir
+   for repo_dir in /var/cache/approx-derivative-maker/*; do
+     if [ -d "${repo_dir}/dists" ]; then
+       $SUDO_TO_ROOT safe-rm --recursive --force -- "${repo_dir}/dists"
      fi
+   done
 
-     ## There is no systemd inside docker. Hence, manually restarting apt-cacher-ng.
-     $SUDO_TO_ROOT /usr/sbin/apt-cacher-ng -c /etc/apt-cacher-ng &
+   $SUDO_TO_ROOT cp --no-preserve=mode -- "$source_code_folder_dist/approx/approx-derivative-maker.socket" '/usr/lib/systemd/system/approx-derivative-maker.socket'
+   if [ "$dist_build_sources_clearnet_or_onion" = "clearnet" ]; then
+      $SUDO_TO_ROOT cp --no-preserve=mode -- "$source_code_folder_dist/approx/approx-derivative-maker@.service" '/usr/lib/systemd/system/approx-derivative-maker@.service'
+      $SUDO_TO_ROOT cp --no-preserve=mode -- "$source_code_folder_dist/approx/approx.conf" '/etc/approx-derivative-maker/approx.conf'
+      $SUDO_TO_ROOT cp --no-preserve=mode -- "$source_code_folder_dist/approx/curlrc" '/etc/approx-derivative-maker/curl-home/.curlrc'
    else
-     $SUDO_TO_ROOT systemctl restart apt-cacher-ng.service
+      $SUDO_TO_ROOT cp --no-preserve=mode -- "$source_code_folder_dist/approx/approx-derivative-maker-tor@.service" '/usr/lib/systemd/system/approx-derivative-maker@.service'
+      $SUDO_TO_ROOT cp --no-preserve=mode -- "$source_code_folder_dist/approx/approx-tor.conf" '/etc/approx-derivative-maker/approx.conf'
+      $SUDO_TO_ROOT cp --no-preserve=mode -- "$source_code_folder_dist/approx/curlrc-tor" '/etc/approx-derivative-maker/curl-home/.curlrc'
    fi
+
+   $SUDO_TO_ROOT systemctl daemon-reload
+   $SUDO_TO_ROOT systemctl restart approx-derivative-maker.socket
 
    if [ "$dist_build_redistributable" != "true" ]; then
       return 0
    fi
 
-   ## When building redistributeable builds, add `/var/cache/apt-cacher-ng` to Qubes bind-dirs on build machine.
-   $SUDO_TO_ROOT mkdir --parents /rw/config/qubes-bind-dirs.d
-   echo "binds+=( '/var/cache/apt-cacher-ng' )" | $SUDO_TO_ROOT tee -- /rw/config/qubes-bind-dirs.d/40_derivative-maker_acng.conf >/dev/null
+   ## When building redistributeable builds, add '/var/cache/approx' to Qubes bind-dirs on build machine.
+   $SUDO_TO_ROOT mkdir --parents -- /rw/config/qubes-bind-dirs.d
+   echo "binds+=( '/var/cache/approx-derivative-maker' )" | $SUDO_TO_ROOT tee -- /rw/config/qubes-bind-dirs.d/40_derivative-maker_approx.conf >/dev/null
 
    true
 }
@@ -320,11 +303,11 @@ repo_proxy_test() {
       return 0
    fi
 
-   true "INFO: Testing REPO_PROXY $REPO_PROXY (most likely apt-cacher-ng, since default)..."
+   true "INFO: Testing REPO_PROXY $REPO_PROXY (most likely approx, since default)..."
    local curl_exit_code=0
    curl --fail --silent "$REPO_PROXY" || { curl_exit_code="$?" ; true; };
-   if [ "$curl_exit_code" = "22" ]; then
-      true "INFO: apt-cacher-ng functional..."
+   if [ "$curl_exit_code" = "0" ]; then
+      true "INFO: approx functional..."
       return 0
    fi
 
@@ -340,11 +323,38 @@ virtualbox-installation() {
    true "INFO: Checking if VirtualBox is already installed..."
    if virtualbox_version_installed="$(dpkg-query --show --showformat='${Version}' "virtualbox")" ; then
       true "INFO: virtualbox is already installed."
-   elif virtualbox_version_installed="$(dpkg-query --show --showformat='${Version}' "virtualbox-7.1")" ; then
-      true "INFO: virtualbox-7.1 is already installed."
-   else
-      "$binary_image_installer_dist_source" --non-interactive --virtualbox-only --log-level=debug --ci
+      return 0
+   elif virtualbox_version_installed="$(dpkg-query --show --showformat='${Version}' "virtualbox-7.2")" ; then
+      true "INFO: virtualbox-7.2 is already installed."
+      return 0
    fi
+
+   ## NOTE: Code duplication in build-step prepare-build-machine
+   ## NOTE: Code duplication in help-step pbuilder-chroot-script-virtualbox
+   dist_installer_cli_arguments=()
+   dist_installer_cli_arguments+=("--non-interactive")
+   dist_installer_cli_arguments+=("--virtualbox-only")
+   dist_installer_cli_arguments+=("--log-level=debug")
+   ## Speed up the build? Not possible.
+   ## `apt-get update` is actually needed to fetch
+   ## VirtualBox from Debian 'unstable' repository.
+   ## Option '--noupdate' should is not safe here, because if the installer adds a repository,
+   ## then running 'apt update' is crucial for APT to learn about the new packages.
+   #dist_installer_cli_arguments+=("--noupdate")
+   ##
+   ## Run virtualbox-installer with '--noupgrade' because the system has been updated earlier.
+   ## This is to avoid a race condition where an update is made available shortly after
+   ## to avoid breaking the build.
+   dist_installer_cli_arguments+=("--noupgrade")
+   dist_installer_cli_arguments+=("--ci")
+   ## Redundant.
+   dist_installer_cli_arguments+=("--no-boot")
+   ## Redundant.
+   dist_installer_cli_arguments+=("--no-import")
+   ## NOTE: End code duplication.
+
+   ## virtualbox-installer / dist-installer-cli
+   "$binary_image_installer_dist_source" "${dist_installer_cli_arguments[@]}"
 
    true
 }
@@ -369,30 +379,85 @@ check-virtualbox-installed() {
    true
 }
 
-check-virtualbox-vm-exists() {
-   ## No longer required since using dedicated Linux user account.
-   return 0
-
+check-vm-exists() {
    if [ "$dist_build_internal_run" = "true" ]; then
       return 0
    fi
-   if [ ! "$dist_build_virtualbox" = "true" ]; then
+
+   if [ ! "$dist_build_type_long" = "workstation" ]; then
       return 0
    fi
 
-   ## VirtualBox might not be installed at this point.
-   ## Trying anyway, in case this script has already been run and installed
-   ## VirtualBox beforehand.
+   ## When using:
+   ## SKIP_SCRIPTS+= " prepare-release "
+   ## then skip this function.
+   local skip_script
+   for skip_script in $SKIP_SCRIPTS; do
+      if matched_word=$(echo "$skip_script" | grep "prepare-release") ; then
+         echo "${bold}${green}$BASH_SOURCE INFO: Skipping $FUNCNAME, because SKIP_SCRIPTS matches 'prepare-release'. matched_word: '$matched_word'${reset}"
+         return 0
+      fi
+   done
 
-   local command_v_exit_code="0"
-   command -v VBoxManage >/dev/null || { command_v_exit_code="$?" ; true; }
+   if [ "$dist_build_raw" = "true" ]; then
+      if ! test -f "$binary_image_raw_file_for_unified" ; then
+         error "\
+Trying to build...
+VMNAME: $VMNAME
+vm_names_to_be_exported: $vm_names_to_be_exported
+dist_build_desktop: $dist_build_desktop
+dist_build_raw: $dist_build_raw
+missing other VM for unified builds: $binary_image_raw_file_for_unified
 
-   if [ ! "$command_v_exit_code" = "0" ]; then
-      true "${cyan}INFO: VBoxManage command not yet available, ok.${reset}"
-      return 0
+This means dm-prepare-release would fail later.
+
+Did you build a CLI build first and now intent to mix with a LXQt build? In this case, set environment variable, for example:
+binary_image_raw_file_for_unified=/path/to/raw ./derivative-maker"
+      fi
    fi
 
-   "$dist_source_help_steps_folder/vm-exists-test" "$@"
+   if [ "$dist_build_qcow2" = "true" ]; then
+      if ! test -f "$binary_image_qcow2_file_for_unified" ; then
+         error "\
+Trying to build...
+VMNAME: $VMNAME
+vm_names_to_be_exported: $vm_names_to_be_exported
+dist_build_desktop: $dist_build_desktop
+dist_build_qcow2: $dist_build_qcow2
+missing other VM for unified builds: $binary_image_qcow2_file_for_unified
+
+This means dm-prepare-release would fail later.
+
+Did you build a CLI build first and now intent to mix with a LXQt build? In this case, set environment variable, for example:
+binary_image_qcow2_file_for_unified=/path/to/qcow ./derivative-maker"
+      fi
+   fi
+
+   if [ "$dist_build_virtualbox" = "true" ]; then
+      true "INFO: vm_names_to_be_exported: $vm_names_to_be_exported"
+      local vm_name_item_to_be_exported
+      for vm_name_item_to_be_exported in $vm_names_to_be_exported ; do
+         if printf "%s\n" "$vm_name_item_to_be_exported" | grep --quiet --ignore-case -- "$dist_build_type_long" ; then
+            true "${cyan}INFO: Build for $VMNAME in progress... No need to check for vm_name_item_to_be_exported $vm_name_item_to_be_exported as we are building that now, ok.${reset}"
+            continue
+         fi
+         true "${cyan}INFO: Build for VMNAME $VMNAME in progress... Checking if corresponding in list of vm_names_to_be_exported vm $vm_name_item_to_be_exported already exists (because if it did not exist, the later dm-prepare-release script would fail)...${reset}"
+         if ! $SUDO_TO_VBOX_TEMP VBoxManage showvminfo "$vm_name_item_to_be_exported" >/dev/null ; then
+            error "\
+Trying to build...
+VMNAME: $VMNAME
+dist_build_desktop: $dist_build_desktop
+missing other VM for unified builds: $vm_name_item_to_be_exported
+
+This means dm-prepare-release would fail later.
+
+Did you build a CLI build first and now intent to mix with a LXQt build? In this case, set environment variable, for example:
+vm_names_to_be_exported=\"Whonix-Gateway-CLI Whonix-Workstation-LXQt\" ./derivative-maker $@"
+         fi
+      done
+
+      true "INFO: all vm_names_to_be_exported available, ok."
+   fi
 
    true
 }
@@ -420,18 +485,19 @@ create-virtualbox-temporary-user() {
    #root ALL=(ALL) NOPASSWD:ALL
    #%sudo   ALL=(ALL:ALL) NOPASSWD:ALL
 
-   ## TODO: add --quiet
-   $SUDO_TO_ROOT -- adduser --system --group --home "$HOMEVAR_VBOX_TEMP" "dm-vbox-temp"
-   $SUDO_TO_ROOT -- mkdir --parents "$HOMEVAR_VBOX_TEMP"
-   $SUDO_TO_ROOT -- chown --recursive "dm-vbox-temp:dm-vbox-temp" "$HOMEVAR_VBOX_TEMP"
-
+   ## {{ code duplication
+   ##    - prepare-build-machine
+   ##    - pbuilder-chroot-script-virtualbox
+   $SUDO_TO_ROOT -- adduser --system --group --home "$HOMEVAR_VBOX_TEMP" -- "dm-vbox-temp"
+   $SUDO_TO_ROOT -- mkdir --parents -- "$HOMEVAR_VBOX_TEMP"
+   $SUDO_TO_ROOT -- chown --recursive -- "dm-vbox-temp:dm-vbox-temp" "$HOMEVAR_VBOX_TEMP"
    ## Debugging.
-   $SUDO_TO_ROOT -- groups dm-vbox-temp || true
-   $SUDO_TO_ROOT -- ls -la "$HOMEVAR_VBOX_TEMP"
-
+   $SUDO_TO_ROOT -- groups -- "dm-vbox-temp" || true
+   $SUDO_TO_ROOT -- ls -la -- "$HOMEVAR_VBOX_TEMP"
    ## Sanity test.
-   $SUDO_TO_VBOX_TEMP -- test -d /
-   $SUDO_TO_VBOX_TEMP -- ls -la "$HOMEVAR_VBOX_TEMP"
+   $SUDO_TO_VBOX_TEMP -- test -d "/"
+   $SUDO_TO_VBOX_TEMP -- ls -la -- "$HOMEVAR_VBOX_TEMP"
+   ## }}
 
    true
 }
@@ -443,71 +509,6 @@ grml-debootstrap_installation() {
    true
 }
 
-packages_installation_from_newer_check() {
-   local package_item
-   for package_item in $dist_build_script_build_dependency_debian_testing ; do
-      dpkg --list | grep --fixed-strings -- "$package_item"
-   done
-}
-
-packages_installation_from_newer_repository() {
-   if [ ! "$dist_build_windows_installer" = "true" ]; then
-      true "INFO: No packages from testing are currently required if not building Windows Installer."
-      return 0
-   fi
-
-   ## TODO: No longer required on Debian trixie?
-
-   ## Hardcoding the versioned package name fp-units-win-rtl-3.2.2 is being avoided.
-   ## fp-units-win-rtl is a virtual package.
-   ## It is not possible to directly check if a virtual package is already installed.
-   ## This is because virtual package are not actually installed.
-   local real_fp_units_win_rtl_package
-   #real_fp_units_win_rtl_package=$(grep-status --field=Provides,Package --show-field=Package,Provides,Status "fp-units-win-rtl" | grep --fixed-strings -- "Package:" | cut --delimiter=" " -f2) || true
-   real_fp_units_win_rtl_package=$(grep-status --field=Package --show-field=Package "fp-units-win-rtl" | grep --fixed-strings -- "Package:" | cut --delimiter=" " -f2) || true
-   ## example real_fp_units_win_rtl_package:
-   ## fp-units-win-rtl-3.2.2
-
-   if [ "$real_fp_units_win_rtl_package" = "" ]; then
-      ## Fallback. This will result in the 'dpkg --status' command to fail,
-      ## which will then result in package installation.
-      real_fp_units_win_rtl_package="fp-units-win-rtl"
-   fi
-
-   local without_virtual_rtl
-   without_virtual_rtl=$(echo "$dist_build_script_build_dependency_debian_testing" | $str_replace_tool "fp-units-win-rtl" "")
-
-   local with_real_package_rtl
-   with_real_package_rtl="$without_virtual_rtl $real_fp_units_win_rtl_package"
-
-   ## Avoid running "apt-get update" again from testing repository if all dependencies are already installed.
-   if dpkg --status $with_real_package_rtl >/dev/null ; then
-      true "INFO: All packages required for building Windows Installer are already installed."
-      packages_installation_from_newer_check
-      return 0
-   fi
-
-   $SUDO_TO_ROOT \
-      apt-get \
-         ${APTGETOPT[@]} \
-         -o Dir::Etc::sourcelist="$dist_build_sources_list_newer" \
-         -o Dir::Etc::sourceparts="-" \
-         update
-
-   $SUDO_TO_ROOT \
-      apt-get \
-         ${APTGETOPT[@]} \
-         -o Dir::Etc::sourcelist="$dist_build_sources_list_newer" \
-         -o Dir::Etc::sourceparts="-" \
-         $apt_unattended_opts \
-         --no-install-recommends \
-         --yes \
-         install \
-         $dist_build_script_build_dependency_debian_testing
-
-   packages_installation_from_newer_check
-}
-
 packages_installation_from_backports_repository() {
    if [ "$dist_build_script_build_dependency_debian_backports" = "" ]; then
       return 0
@@ -515,15 +516,15 @@ packages_installation_from_backports_repository() {
 
    $SUDO_TO_ROOT \
       apt-get \
-         ${APTGETOPT[@]} \
-         -o Dir::Etc::sourcelist="$dist_build_sources_list_debian_bookworm_backports" \
+         "${APTGETOPT[@]}" \
+         -o Dir::Etc::sourcelist="$dist_build_sources_list_debian_forky_backports" \
          -o Dir::Etc::sourceparts="-" \
          update
 
    $SUDO_TO_ROOT \
       apt-get \
-         ${APTGETOPT[@]} \
-         -o Dir::Etc::sourcelist="$dist_build_sources_list_debian_bookworm_backports" \
+         "${APTGETOPT[@]}" \
+         -o Dir::Etc::sourcelist="$dist_build_sources_list_debian_forky_backports" \
          -o Dir::Etc::sourceparts="-" \
          $apt_unattended_opts \
          --no-install-recommends \
@@ -597,16 +598,15 @@ Defaults:%$USER runcwd=*
 }
 
 main() {
-   repo_proxy_setup "$@"
+   approx_proxy_setup "$@"
    repo_proxy_test "$@"
    build_machine_setup "$@"
    check-unicode "$@"
    check-git-folder "$@"
    virtualbox-installation
    check-virtualbox-installed "$@"
-   check-virtualbox-vm-exists "$@"
+   check-vm-exists "$@"
    grml-debootstrap_installation "$@"
-   packages_installation_from_newer_repository "$@"
    packages_installation_from_backports_repository "$@"
    signing_key "$@"
    sudo_setup "$@"

@@ -19,9 +19,6 @@ source colors
 source variables
 
 create-debian-raw-image() {
-   ## provided by: help-steps/pre
-   apt-cacher-ng_config_check
-
    mkdir --parents "$binary_build_folder_dist/"
 
    if [ "$dist_build_raw_base_image_create" = "true" ]; then
@@ -40,7 +37,7 @@ create-debian-raw-image() {
          error "cached_binary_image_raw_file '$cached_binary_image_raw_file' does not exist!"
       fi
       $SUDO_TO_ROOT chown "$user_name:$user_name" "$cached_binary_image_raw_file"
-      $SUDO_TO_ROOT rm -f "$binary_image_raw_file"
+      $SUDO_TO_ROOT safe-rm -f -- "$binary_image_raw_file"
       cp "$cached_binary_image_raw_file" "$binary_image_raw_file"
       true "${cyan}$BASH_SOURCE INFO: copying cached_binary_image_raw_file done.${reset}"
       return 0
@@ -50,12 +47,12 @@ create-debian-raw-image() {
    true "${cyan}$BASH_SOURCE INFO: Architecture $ARCH detected.${reset}"
    true "${cyan}INFO: dist_build_target_arch set to: $dist_build_target_arch${reset}"
 
-   $SUDO_TO_ROOT mkdir --parents "/etc/debootstrap/etc/apt/"
-   $SUDO_TO_ROOT cp "$dist_build_sources_list_primary" "/etc/debootstrap/etc/apt/sources.list"
+   $SUDO_TO_ROOT mkdir --parents "/etc/debootstrap/etc/apt/sources.list.d"
+   $SUDO_TO_ROOT cp "$dist_build_sources_list_primary" "/etc/debootstrap/etc/apt/sources.list.d/derivative.sources"
 
    ## Info.
-   true "${cyan}INFO: Using the following /etc/apt/sources.list for grml-debootstrap: ${reset}"
-   $SUDO_TO_ROOT cat "/etc/debootstrap/etc/apt/sources.list"
+   true "${cyan}INFO: Using the following /etc/apt/sources.list.d/derivative.sources for grml-debootstrap: ${reset}"
+   $SUDO_TO_ROOT cat "/etc/debootstrap/etc/apt/sources.list.d/derivative.sources"
 
    ## TODO
    ## /etc/resolv.conf of host leaks into image.
@@ -76,7 +73,7 @@ create-debian-raw-image() {
    [ -n "$REPORT_TRAP_ERR" ] || export REPORT_TRAP_ERR="yes"
    [ -n "$FAIL_TRAP_ERR" ] || export FAIL_TRAP_ERR="yes"
 
-   [ -n "$DPKG_OPTIONS" ] || export DPKG_OPTIONS=${APTGETOPT[@]}
+   [ -n "$DPKG_OPTIONS" ] || export DPKG_OPTIONS="${APTGETOPT[@]}"
 
    ## Do not install non-Free software.
    [ -n "$COMPONENTS" ] || export COMPONENTS='main'
@@ -157,8 +154,8 @@ create-debian-raw-image() {
    ## - Cannot be combined with mmdebstrap.
    ## - Cannot bootstrap from multiple (regular and security) repositories
    ##   at the same time aka "multistrap".
-   ## - Does not support APT sources in a sources.list file such as for example
-   ##   build_sources/debian_stable_current_clearnet.list
+   ## - Does not support APT sources in a sources  file such as for example
+   ##   build_sources/debian_stable_current_clearnet.sources
    ##   (variable: dist_build_sources_list_primary)
    ##   but requires an APT URI such as for example.
    ##   http://HTTPS///deb.debian.org/debian
@@ -166,7 +163,7 @@ create-debian-raw-image() {
 
    ## grml-debootstrap's default is initramfs.
    ## https://github.com/grml/grml-debootstrap/pull/196
-   if echo "${BUILD_INITRAMFS_PKGS}" | grep -q dracut ; then
+   if printf '%s\n' "${BUILD_INITRAMFS_PKGS}" | grep -- dracut &>/dev/null; then
       ## This has currently no effect. Since kernel installation and initrd
       ## creating is not done during this step, grml-debootstrap chroot-script
       ## will skip initramfs creation.

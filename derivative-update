@@ -1,0 +1,263 @@
+#!/bin/bash
+
+## Copyright (C) 2012 - 2025 ENCRYPTED SUPPORT LLC <adrelanos@whonix.org>
+## See the file COPYING for copying conditions.
+
+set -x
+set -o errexit
+set -o errtrace
+set -o pipefail
+
+true "INFO: Currently running script: ${BASH_SOURCE[0]} $*"
+
+MYDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+cd "$MYDIR"
+
+dist_build_internal_run="true"
+
+source ./help-steps/pre
+source ./help-steps/colors
+source ./help-steps/variables
+
+source ./help-steps/git_sanity_test
+
+error_handler_dist_build_one() {
+   true "${red}${bold}ERROR in $0${reset}"
+   true "${red}${bold}BASH_COMMAND${reset}: $BASH_COMMAND"
+   true "${red}\$@: $*${reset}"
+   true "${red}${bold}INFO: Now exiting from $0 (because error was detected, see above).${reset}"
+   exit 1
+}
+
+trap "error_handler_dist_build_one" ERR
+
+abort_update() {
+  local error_msg recover_commit branch_reset_commit
+
+  error_msg="${1:-}"
+  recover_commit="${2:-}"
+  branch_reset_commit="${3:-}"
+
+  if [ -z "${error_msg}" ]; then
+    error 'no error_msg variable provided to abort_update!'
+  fi
+
+  if [ -n "${recover_commit}" ]; then
+    if [ -n "${branch_reset_commit}" ]; then
+      ## Cannot use 'error' here because we want to use the 'error' below.
+      ## NOTE: Cannot use end-of-options ("--").
+      ## NOTE: 'git checkout' will prefer branch or commit IDs over tags when
+      ## not using 'refs/tags/'. branch_reset_commit will refer to either a
+      ## commit hash, or a 'ref^{commit}'.
+      git reset --hard --recurse-submodules "${branch_reset_commit}" || true "ERROR: 'git reset --hard --recurse-submodules' failed."
+    fi
+
+    ## NOTE: Cannot use end-of-options ("--").
+    ## NOTE: 'git checkout' will prefer branch or commit IDs over tags when
+    ## not using 'refs/tags/'. recover_commit will refer to either a commit
+    ## hash, or a 'ref^{commit}'.
+    git checkout --recurse-submodules "${recover_commit}" || true "ERROR: 'git checkout --recurse-submodules' failed."
+  fi
+
+  error "${error_msg}"
+}
+
+update_repo() {
+  local branch_reset_commit current_branch \
+    upstream_branch submodule_path_list submodule_path_item \
+    latest_tag_commit
+
+  if [ -z "${target_tag}" ] && [ -z "${target_ref}" ] && [ -z "${update_only}" ]; then
+    error 'You did not tell me what to check out.
+           * Use --tag <tag>   to move to a signed tag, e.g. --tag 17.4.1.9-developers-only
+           * Or  --tag latest  to move to the latest signed tag
+           * Or  --ref <name>  for a branch or commit, e.g.  --ref master
+           --help for the full syntax.
+           * Or --update-only to only update submodules.'
+  fi
+  if [ -n "${target_tag}" ] && [ -n "${target_ref}" ]; then
+    error 'Options --tag and --ref are mutually exclusive.
+           Choose exactly one of them; for example:
+           derivative-update --tag 17.4.1.9-developers-only
+           derivative-update --ref master'
+  fi
+  if [ -n "${target_tag}" ] && [ -n "${update_only}" ]; then
+    error 'Options --tag and --update-only are mutually exclusive.
+           Use --update-only alone while a tag is checked out.'
+  fi
+  if [ -n "${target_ref}" ] && [ -n "${update_only}" ]; then
+    error 'Options --ref and --update-only are mutually exclusive.
+           Use --update-only alone while a tag is checked out.'
+  fi
+
+  if ! test -f '.gitmodules' ; then
+    error "Missing '.gitmodules' file."
+  fi
+
+  ## We need there to be no uncommitted changes in order to robustly verify the repository state.
+  ## If there are uncommitted changes, stop.
+  ## (Except if using '--allow-uncommitted true'.)
+  ## This also performs digital signature (gpg) verification of the current git HEAD.
+  git_sanity_test_main "$@"
+
+  true "INFO: $BASH_SOURCE continuing..."
+
+  if [ "$update_only" = "true" ]; then
+    ## Variable 'git_tag_exact' is set in 'git_sanity_test'.
+    target_tag="$git_tag_exact"
+    if [ -z "${target_tag}" ]; then
+      error '--update-only used, but no tag was checked out in advance!'
+    fi
+  fi
+
+  ## Fetch new code from remote.
+  git fetch --recurse-submodules --jobs=100 || error 'Failed to fetch from remote!'
+
+  ## If we were asked to check out the 'latest' tag, find the latest tag.
+  if [ "${target_tag}" = 'latest' ]; then
+    true "INFO: latest tag requested: yes"
+    latest_tag_commit="$(git rev-list --tags --max-count=1)" || error 'Failed to find latest tag commit.'
+    [[ -z "$latest_tag_commit" ]] && error 'No tags found.'
+    target_tag="$(git describe --tags -- "$latest_tag_commit")" || error 'Failed to find latest git tag.'
+  else
+    true "INFO: latest tag requested: no"
+  fi
+
+  ## Verify the specified ref, then check out that ref.
+  if [ -n "${target_tag}" ]; then
+    if ! verify_ref "${target_tag}" 'tag'; then
+      abort_update 'Tag verification failed!'
+    fi
+
+    if [ "$update_only" = "true" ]; then
+      true "INFO: --update-only. Not running git checkout."
+    else
+      ## NOTE: Cannot use end-of-options ("--").
+      ## NOTE: 'refs/tags/' is necessary to prevent ambiguity in the event of a
+      ## tag with the same name as a branch.
+      git checkout --recurse-submodules "refs/tags/${target_tag}" || abort_update 'Tag checkout failed!'
+    fi
+
+    ## Safe.
+    ## Ensures submodules' remote URL configuration matches the values specified in '.gitmodules'.
+    git submodule sync --recursive || error "'git submodule sync --recursive' failed."
+
+    ## Caution.
+    ## This command updates Git submodules to the commit recorded in the parent repository. (derivative-maker)
+    ## It modifies the submodule's Git HEAD, potentially overriding local changes.
+    git -c merge.verifySignatures=true submodule update --init --recursive --jobs=200 --merge \
+      || abort_update \
+        'Submodule update failed!' \
+        "${dist_build_current_git_head}"
+
+  elif [ -n "${target_ref}" ]; then
+    if ! verify_ref "${target_ref}" 'commit'; then
+      abort_update 'Ref verification failed!'
+    fi
+
+    ## NOTE: Cannot use end-of-options ("--").
+    ## NOTE: 'git checkout' will prefer branch or commit IDs over tags when not using 'refs/tags/'.
+    ## NOTE: 'refs/heads/' cannot be used here as that would put the repo into detached HEAD state.
+    ## NOTE: 'refs/remotes/origin/${target_ref}' would also put the repo into detached HEAD state.
+    git checkout --recurse-submodules "${target_ref}" || abort_update 'Ref checkout failed!'
+
+    ## Check if the given target_ref is a local branch name.
+    if git show-ref --verify -- "refs/heads/${target_ref}"; then
+      true "INFO: given target_ref is a local branch name: yes"
+      ## The specified ref is a branch, meaning the user is trying to update
+      ## to the latest commit of the specified branch.
+      ##
+      ## Merge the branch with its remote (which we fetched earlier), then
+      ## re-verify the branch. If it flunks verification, try to fix
+      ## the local branch, then revert to the original ref.
+      ##
+      ## Note that we make a best-effort attempt to get the local branch
+      ## back to a known-good state in the event the branch flunks
+      ## verification. If that attempt fails, we ignore the failure since
+      ## it's important to get the working tree back into a known-good state
+      ## if at all possible. Thus it is possible that failed verification
+      ## during a branch update could lead to a compromised local branch.
+
+      ## Save the ref first so we can undo the merge if it goes wrong.
+      ## NOTE: This must be run after 'git checkout'.
+      ## NOTE: Cannot use end-of-options ("--").
+      branch_reset_commit="$(git rev-parse HEAD)" || error 'Cannot get head commit ID!'
+
+      ## Safe.
+      ## Ensures submodules' remote URL configuration matches the values specified in '.gitmodules'.
+      git submodule sync --recursive || error "'git submodule sync --recursive' failed."
+      ## Do merge and verify.
+      ## If any of the steps involved fail, trigger a rollback.
+      ## NOTE: This is safe - the script has already checked out target_ref,
+      ## and verified that target_ref is a branch. The only known way this
+      ## command could error out is if the user interrupts the script after
+      ## the ref checkout but before the ref update using Ctrl+Z, puts the git
+      ## repo into an unexpected state (detached HEAD for instance), then
+      ## resumes the script with 'fg'.
+      current_branch="$(git symbolic-ref -q -- HEAD)" \
+        || abort_update \
+          'Getting current branch name failed!' \
+          "${dist_build_current_git_head}" "${branch_reset_commit}"
+      ## NOTE: 'current_branch' format is like 'refs/heads/master',
+      ## 'upstream_branch' format is like 'origin/master'.
+      upstream_branch="$(git for-each-ref --format='%(upstream:short)' "$current_branch")" \
+        || abort_update \
+          'Getting upstream branch name failed!' \
+          "${dist_build_current_git_head}" "${branch_reset_commit}"
+      ## NOTE: Using 'refs/remotes/' here to avoid any possible ambiguity.
+      ## This is valid here.
+      git merge --ff-only "refs/remotes/${upstream_branch}" \
+        || abort_update \
+          'Merge from remote failed!' \
+          "${dist_build_current_git_head}" "${branch_reset_commit}"
+      ## NOTE: Not using 'refs/remotes/' here because we want to verify the
+      ## state of the locally checked-out-and-updated branch, not the remote
+      ## branch.
+      verify_ref "${target_ref}" 'commit' \
+        || abort_update \
+          'Remote commit verification failed! You are now in detached HEAD state, you will need to check out a branch you trust manually.' \
+          "${dist_build_current_git_head}" "${branch_reset_commit}"
+      ## Caution.
+      ## This command updates Git submodules to the commit recorded in the parent repository. (derivative-maker)
+      ## It modifies the submodule's Git HEAD, potentially overriding local changes.
+      git -c merge.verifySignatures=true submodule update --init --recursive --jobs=200 --merge \
+        || abort_update \
+          'Submodule update failed!' \
+          "${dist_build_current_git_head}" "${branch_reset_commit}"
+      verify_ref "${target_ref}" 'commit' \
+        || abort_update \
+          'Verification failed after submodule update!' \
+          "${dist_build_current_git_head}" "${branch_reset_commit}"
+    else
+      true "INFO: given target_ref is a local branch name: no"
+    fi
+  else
+    error "Neither target_tag nor target_ref is set."
+  fi
+
+  if [ -n "$(git status --porcelain=v1 2>&1)" ]; then
+    if [ "$dist_build_ignore_uncommitted" = "true" ]; then
+      true "${bold}${cyan}$BASH_SOURCE INFO: Git reports uncommitted changes! But you requested to ignore uncommitted changes, continuing... ${reset}"
+    else
+      error 'Unexpected uncommitted changes after checkout.'
+    fi
+  fi
+
+  true "INFO: Running git describe for informational purposes."
+  git describe
+
+  true "INFO: Success."
+}
+
+main() {
+  if [ "$(id -u)" = "0" ]; then
+    true "${red}${bold}ERROR: This must NOT be run as root (sudo)!${reset}"
+    exit 1
+  fi
+  true "INFO: Script running as as non-root, ok."
+
+  update_repo "$@"
+}
+
+main "$@"

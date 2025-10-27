@@ -90,6 +90,11 @@
         url = https://github.com/Kicksecure/bootclockrandomization.git
         #url = https://gitlab.com/kicksecure/bootclockrandomization.git
 
+[submodule "browser-choice"]
+        path = packages/kicksecure/browser-choice
+        url = https://github.com/Kicksecure/browser-choice.git
+        #url = https://gitlab.com/kicksecure/browser-choice.git
+
 [submodule "calamares-settings-debian"]
         path = packages/kicksecure/calamares-settings-debian
         url = https://github.com/Kicksecure/calamares-settings-debian.git
@@ -190,6 +195,11 @@
         url = https://github.com/Kicksecure/live-config-dist.git
         #url = https://gitlab.com/kicksecure/live-config-dist.git
 
+[submodule "lxqt-wayland-session"]
+        path = packages/kicksecure/lxqt-wayland-session
+        url = https://github.com/Kicksecure/lxqt-wayland-session.git
+        #url = https://gitlab.com/kicksecure/lxqt-wayland-session.git
+
 [submodule "mediawiki-shell"]
         path = packages/kicksecure/mediawiki-shell
         url = https://github.com/Kicksecure/mediawiki-shell.git
@@ -279,11 +289,6 @@
         path = packages/kicksecure/systemcheck
         url = https://github.com/Kicksecure/systemcheck.git
         #url = https://gitlab.com/kicksecure/systemcheck.git
-
-[submodule "tb-default-browser"]
-        path = packages/kicksecure/tb-default-browser
-        url = https://github.com/Kicksecure/tb-default-browser.git
-        #url = https://gitlab.com/kicksecure/tb-default-browser.git
 
 [submodule "tb-starter"]
         path = packages/kicksecure/tb-starter

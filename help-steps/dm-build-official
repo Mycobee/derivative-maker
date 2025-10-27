@@ -10,6 +10,11 @@
 
 set -x
 set -e
+
+MYDIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" && pwd )"
+cd -- "$MYDIR"
+cd ..
+
 true "$0: START"
 
 true "$0: checklist..."
@@ -17,10 +22,15 @@ df -h
 sleep 2
 
 ## Debugging.
+whoami
 ls -la
 pwd
 
-cd derivative-maker
+if [ "$CI" = "true" ]; then
+  ## fetch/merge git submodules
+  ## CI testing of 'derivative-update'.
+  ./derivative-update --update-only
+fi
 
 true "$0: --------------------"
 ./help-steps/dm-build-official-one "$@"
