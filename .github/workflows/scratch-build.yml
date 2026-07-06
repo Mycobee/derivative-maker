@@ -1,0 +1,44 @@
+---
+## SCRATCH: one-off "can we build derivative-maker on GHA?" smoke test.
+## Uses the pre-gifted docker/derivative-maker-docker-run launcher
+## (systemd + sudo container). Throwaway — clean up later.
+name: SCRATCH build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - ci-native-build
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - name: Checkout (recursive submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Build kicksecure-cli raw amd64 via pre-gifted docker
+        env:
+          CI: "true"
+        run: |
+          ./docker/derivative-maker-docker-run -- \
+            --flavor kicksecure-cli \
+            --target raw \
+            --type vm \
+            --arch amd64 \
+            --allow-untagged true \
+            --allow-uncommitted true \
+            --repo true \
+            --remote-derivative-packages true
+
+      - name: Upload build output + logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scratch-kicksecure-cli-raw-amd64
+          path: ~/binary_mnt/
+          retention-days: 7
