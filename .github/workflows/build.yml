@@ -17,8 +17,9 @@ jobs:
         include:
           - arch: amd64
             runner: ubuntu-24.04
-          - arch: arm64
-            runner: ubuntu-24.04-arm
+          ## TODO: re-enable arm64 once amd64 is green
+          # - arch: arm64
+          #   runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
     steps:

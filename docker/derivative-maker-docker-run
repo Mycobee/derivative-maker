@@ -82,6 +82,8 @@ build_docker_image() {
     -- \
       docker \
         build \
+        --build-arg \
+        DM_UID="$(id -u)" \
         --tag \
         "${IMG}:latest" \
         "${DOCKER_DIR}"
