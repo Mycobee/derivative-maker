@@ -40,6 +40,7 @@ jobs:
             --arch ${{ matrix.arch }} \
             --allow-untagged true \
             --allow-uncommitted true \
+            --allow-unsigned true \
             --repo true \
             --remote-derivative-packages true
 
