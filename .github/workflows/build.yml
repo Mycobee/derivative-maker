@@ -46,7 +46,7 @@ jobs:
 
       - name: Upload build output + logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: kicksecure-cli-raw-${{ matrix.arch }}
           path: ~/binary_mnt/
