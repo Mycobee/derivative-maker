@@ -57,23 +57,24 @@ for distro in "${distros[@]}"; do
                runner="ubuntu-24.04"
             fi
 
-            ## whonix splits into two builds; kicksecure is one.
+            ## whonix is a unified build: gateway + workstation must be
+            ## built in the SAME job/workspace (workstation export needs
+            ## the gateway .raw). So emit ONE entry carrying both flavors
+            ## (built sequentially, gateway first). kicksecure is one.
             if [ "$distro" = "whonix" ]; then
-               full_flavors=("whonix-gateway-${flavor}" "whonix-workstation-${flavor}")
+               flavor_list="whonix-gateway-${flavor} whonix-workstation-${flavor}"
             else
-               full_flavors=("kicksecure-${flavor}")
+               flavor_list="kicksecure-${flavor}"
             fi
 
-            for full_flavor in "${full_flavors[@]}"; do
-               entries+=("$(jq -n \
-                  --arg flavor "$full_flavor" \
-                  --arg target "$target" \
-                  --arg arch "$arch" \
-                  --arg type "$type" \
-                  --arg runner "$runner" \
-                  --arg name "${full_flavor}-${target}-${arch}" \
-                  '{flavor:$flavor, target:$target, arch:$arch, type:$type, runner:$runner, name:$name}')")
-            done
+            entries+=("$(jq -n \
+               --arg flavors "$flavor_list" \
+               --arg target "$target" \
+               --arg arch "$arch" \
+               --arg type "$type" \
+               --arg runner "$runner" \
+               --arg name "${distro}-${flavor}-${target}-${arch}" \
+               '{flavors:$flavors, target:$target, arch:$arch, type:$type, runner:$runner, name:$name}')")
          done
       done
    done
