@@ -19,9 +19,7 @@ if [ $# -eq 0 ]; then
   exit 1
 fi
 
-## A TTY is only required for interactive use (e.g. "bash", "journalctl -f").
-## Headless CI runs deliberately omit "docker run --tty" and set CI=true.
-if [ ! -t 0 ] && [ "${CI:-}" != "true" ]; then
+if [ ! -t 0 ]; then
   printf '%s\n' 'ERROR: TTY needs to be enabled ("docker run -t ...").' >&2
   exit 1
 fi
