@@ -1,0 +1,31 @@
+#!/bin/bash
+
+## Copyright (C) 2026 - 2026 ENCRYPTED SUPPORT LLC <adrelanos@whonix.org>
+## See the file COPYING for copying conditions.
+
+## Build one or more derivative-maker flavors sequentially, in-process, on
+## the SAME machine. Whonix requires this: gateway + workstation must share
+## build state (notably the VirtualBox registry and vbox workdir), which
+## only persists within a single container. Running each flavor in its own
+## `docker-run` container loses that state between them.
+##
+## Invoked as the container command by .github/workflows/build.yml via
+## `derivative-maker-docker-run -c ./ci/build-flavors -- "<flavors>" <args>`.
+## First argument is a space-separated flavor list; the rest are the common
+## derivative-maker arguments applied to every flavor.
+
+set -o errexit
+set -o nounset
+set -o pipefail
+set -o errtrace
+shopt -s inherit_errexit
+
+flavors="${1:?flavor list required as first argument}"
+shift
+
+cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/.."
+
+for flavor in $flavors; do
+   printf '\n=== building %s ===\n' "$flavor"
+   ./derivative-maker --flavor "$flavor" "$@"
+done

@@ -76,26 +76,22 @@ jobs:
       - name: Build ${{ matrix.name }}
         env:
           CI: "true"
-          ## whonix carries two flavors (gateway workstation); kicksecure one.
           FLAVORS: ${{ matrix.flavors }}
           TARGET: ${{ matrix.target }}
           BUILD_TYPE: ${{ matrix.type }}
           ARCH: ${{ matrix.arch }}
           FAST_FLAGS: ${{ github.event.inputs.fast_build == 'false' && ' ' || '--repo true --remote-derivative-packages true' }}
         run: |
-          for flavor in $FLAVORS; do
-            printf '\n=== building %s (%s %s %s) ===\n' "$flavor" "$TARGET" "$BUILD_TYPE" "$ARCH"
-            ./docker/derivative-maker-docker-run -- \
-              --flavor "$flavor" \
-              --target "$TARGET" \
-              --type "$BUILD_TYPE" \
-              --arch "$ARCH" \
-              --allow-untagged true \
-              --allow-uncommitted true \
-              --allow-unsigned true \
-              --freedom false \
-              $FAST_FLAGS
-          done
+          ./docker/derivative-maker-docker-run -c ./ci/build-flavors -- \
+            "$FLAVORS" \
+            --target "$TARGET" \
+            --type "$BUILD_TYPE" \
+            --arch "$ARCH" \
+            --allow-untagged true \
+            --allow-uncommitted true \
+            --allow-unsigned true \
+            --freedom false \
+            $FAST_FLAGS
 
       - name: Prune live-build cache before upload
         if: always()
