@@ -97,6 +97,16 @@ jobs:
               $FAST_FLAGS
           done
 
+      - name: Prune live-build cache before upload
+        if: always()
+        ## The iso target (live-build) leaves a root-owned bootstrap chroot
+        ## under binary_mnt/<version>/live-build/ containing dirs like
+        ## etc/ssl/private (mode 0700). upload-artifact walks the tree before
+        ## applying excludes, so it EACCES's on that dir. Remove the whole
+        ## cache (root-owned -> sudo) — it is a bulky build intermediate we
+        ## never want in the artifact anyway.
+        run: sudo find "$HOME/binary_mnt" -type d -name live-build -prune -exec rm -rf {} + 2>/dev/null || true
+
       - name: Upload build output + logs
         if: always()
         uses: actions/upload-artifact@v7
