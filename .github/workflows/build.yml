@@ -60,6 +60,7 @@ jobs:
 
   build:
     needs: resolve
+    name: ${{ matrix.name }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.resolve.outputs.matrix) }}
