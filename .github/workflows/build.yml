@@ -93,6 +93,7 @@ jobs:
               --allow-untagged true \
               --allow-uncommitted true \
               --allow-unsigned true \
+              --freedom false \
               $FAST_FLAGS
           done
 
