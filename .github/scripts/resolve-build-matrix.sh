@@ -45,6 +45,14 @@ for distro in "${distros[@]}"; do
                continue
             fi
 
+            ## VirtualBox on arm64 is only available on macOS hosts, not
+            ## Linux, so the standard Linux build pipeline cannot produce
+            ## it. Supporting arm64 vbox needs a bespoke build pattern
+            ## (TODO: later).
+            if [ "$target" = "virtualbox" ] && [ "$arch" = "arm64" ]; then
+               continue
+            fi
+
             if [ "$target" = "iso" ]; then
                type="host"
             else
