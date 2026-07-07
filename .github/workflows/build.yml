@@ -3,6 +3,31 @@ name: Build
 
 on:
   workflow_dispatch:
+    inputs:
+      distro:
+        description: "Distro (or all)"
+        type: choice
+        default: kicksecure
+        options: [all, whonix, kicksecure]
+      flavor:
+        description: "Flavor (or all)"
+        type: choice
+        default: cli
+        options: [all, cli, lxqt]
+      target:
+        description: "Target (or all)"
+        type: choice
+        default: raw
+        options: [all, raw, virtualbox, iso]
+      arch:
+        description: "Arch (or all)"
+        type: choice
+        default: all
+        options: [all, amd64, arm64]
+      fast_build:
+        description: "Fast build (remote prebuilt packages)"
+        type: boolean
+        default: true
   push:
     branches:
       - '**ci**'
@@ -10,15 +35,34 @@ on:
       - '*'
 
 jobs:
+  ## Expand the selectors into a matrix. On push/tag (no inputs) this
+  ## defaults to the kicksecure-cli raw smoke set on both arches.
+  resolve:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.gen.outputs.matrix }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: false
+          fetch-depth: 1
+      - name: Resolve build matrix
+        id: gen
+        run: |
+          matrix="$(bash ./.github/scripts/resolve-build-matrix.sh \
+            '${{ github.event.inputs.distro || 'kicksecure' }}' \
+            '${{ github.event.inputs.flavor || 'cli' }}' \
+            '${{ github.event.inputs.target || 'raw' }}' \
+            '${{ github.event.inputs.arch || 'all' }}')"
+          printf 'matrix=%s\n' "$matrix" >> "$GITHUB_OUTPUT"
+          printf 'Resolved matrix:\n' && printf '%s' "$matrix" | jq .
+
   build:
+    needs: resolve
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - arch: amd64
-            runner: ubuntu-24.04
-          - arch: arm64
-            runner: ubuntu-24.04-arm
+      matrix: ${{ fromJSON(needs.resolve.outputs.matrix) }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
     steps:
@@ -28,25 +72,24 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
-      - name: Build kicksecure-cli raw
+      - name: Build ${{ matrix.name }}
         env:
           CI: "true"
         run: |
           ./docker/derivative-maker-docker-run -- \
-            --flavor kicksecure-cli \
-            --target raw \
-            --type vm \
+            --flavor ${{ matrix.flavor }} \
+            --target ${{ matrix.target }} \
+            --type ${{ matrix.type }} \
             --arch ${{ matrix.arch }} \
             --allow-untagged true \
             --allow-uncommitted true \
             --allow-unsigned true \
-            --repo true \
-            --remote-derivative-packages true
+            ${{ github.event.inputs.fast_build == 'false' && ' ' || '--repo true --remote-derivative-packages true' }}
 
       - name: Upload build output + logs
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: kicksecure-cli-raw-${{ matrix.arch }}
+          name: ${{ matrix.name }}
           path: ~/binary_mnt/
           retention-days: 7
