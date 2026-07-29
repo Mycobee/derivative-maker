@@ -42,20 +42,12 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Mirror Kicksecure/ and Whonix/ to ${{ github.repository_owner }}
-        env:
-          REPOSITORY_OWNER: ${{ github.repository_owner }}
-        if: github.repository_owner != 'Whonix' && github.repository_owner != 'Kicksecure'
-        run: ./ci/configure-fork-mirror "${REPOSITORY_OWNER}" "${REPOSITORY_OWNER}"
-
+      ## No fork-mirror rewrite: this fork does not mirror the ~60 Kicksecure/
+      ## Whonix submodules, so clone them straight from the public upstream orgs.
+      ## (Rewriting to a fork org that lacks the mirrors is what made every build
+      ## workflow fail submodule init with 'could not read Username'.)
       - name: Initialize submodules
         run: git submodule update --init --recursive
-
-      - name: Check out matching fork branch in cross-org submodules (if present)
-        if: github.repository_owner != 'Whonix' && github.repository_owner != 'Kicksecure'
-        env:
-          FORK_BRANCH: ${{ github.head_ref || github.ref_name }}
-        run: ./ci/checkout-fork-submodule-branches "${FORK_BRANCH}"
 
       - name: Free runner disk space
         run: ./ci/free-disk
