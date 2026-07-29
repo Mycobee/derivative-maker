@@ -1,0 +1,79 @@
+---
+name: VirtualBox arm64 Build
+
+## Repo-private lane (G-A-005 'local-' prefix). Builds the arm64 VirtualBox .ova
+## and uploads it as a downloadable artifact for manual local testing.
+##
+## Boot-testing the .ova is NOT done here: an arm64 VirtualBox guest can only run
+## on macOS/Apple-Silicon (Linux only builds the .ova, offline in an amd64
+## cowbuilder chroot). That step is deferred.
+##
+## Trigger from the Actions tab (workflow_dispatch) or by pushing a '**ci**'
+## branch, then download 'vbox-arm64-ova' from the run page.
+##
+## See agents/github-actions-security.md for the pinning / permissions patterns.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - '**ci**'
+
+## Least privilege (rule 1).
+permissions:
+  contents: read
+
+## Per-ref cancellation (G-A-006).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    ## Fork-PR guard (rule 3).
+    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 180
+    steps:
+      - name: Checkout repository (no submodules yet)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: false
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Mirror Kicksecure/ and Whonix/ to ${{ github.repository_owner }}
+        env:
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+        if: github.repository_owner != 'Whonix' && github.repository_owner != 'Kicksecure'
+        run: ./ci/configure-fork-mirror "${REPOSITORY_OWNER}" "${REPOSITORY_OWNER}"
+
+      - name: Initialize submodules
+        run: git submodule update --init --recursive
+
+      - name: Check out matching fork branch in cross-org submodules (if present)
+        if: github.repository_owner != 'Whonix' && github.repository_owner != 'Kicksecure'
+        env:
+          FORK_BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: ./ci/checkout-fork-submodule-branches "${FORK_BRANCH}"
+
+      - name: Free runner disk space
+        run: ./ci/free-disk
+
+      - name: Build kicksecure-cli VirtualBox .ova (arm64)
+        ## Native arm64 build so the .ova is a REAL build (parse-cmd only degrades
+        ## a CROSS build to a dry-run under CI; a native build is unaffected).
+        ## ci/build signs HEAD with an ephemeral CI key and runs the whole build
+        ## in one docker-run.
+        run: >-
+          ./docker/derivative-maker-docker-run --
+          ci/build --arch arm64 --target virtualbox --flavor kicksecure-cli --freshness frozen
+
+      - name: Upload built .ova
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: vbox-arm64-ova
+          path: /home/runner/binary_mnt/**/Kicksecure-*.ova
+          if-no-files-found: error
+          ## Generous window so the .ova can be downloaded and tested by hand.
+          retention-days: 14
